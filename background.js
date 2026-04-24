@@ -1,37 +1,40 @@
 if (typeof importScripts === "function") {
   importScripts("common.js")
+  importScripts("background.logic.js")
 }
 
-/* global chrome, EpicFabCommon */
+/* global chrome, EpicFabBackgroundLogic, EpicFabCommon */
 
 const {
-  DEFAULT_SETTINGS,
   STORAGE_KEYS,
   SITE_LABELS,
-  computePendingCount,
   mergeSettings,
   nowIso,
   parseEpicPromotionsResponse,
   serializeError,
 } = EpicFabCommon
+const {
+  buildNextDebugLog,
+  getRunScope,
+  pickBestFrameResponse,
+  pickFabCampaignEndDate,
+  shouldSkipFabDetailInspection,
+} = EpicFabBackgroundLogic
 
 const CHECK_ALARM_NAME = "epic-fab-weekly-check"
 const MAX_AUTOMATION_STEPS = 20
 const DEBUG_LOG_LIMIT = 200
 const OFFER_CONCURRENCY = 3
-const RESPONSE_STATUS_PRIORITY = {
-  claimed: 100,
-  "already-owned": 90,
-  navigating: 80,
-  "challenge-required": 70,
-  "login-required": 60,
-  claimable: 50,
-  "needs-manual": 20,
-  error: 10,
-  unknown: 0,
+const ACTION_BASE_ICON_PATH = "icon.ico"
+const ACTION_ICON_SIZES = [16, 32, 48, 128]
+const ACTION_INDICATOR_COLORS = {
+  pending: "#d9a404",
+  claimed: "#1f9d55",
 }
 
 let activeRunPromise = null
+let debugLogWriteQueue = Promise.resolve()
+let baseActionIconBitmapPromise = null
 
 chrome.runtime.onInstalled.addListener(async () => {
   await ensureInitialized()
@@ -172,12 +175,88 @@ async function scheduleAlarm() {
 }
 
 async function updateBadge(state) {
-  const pendingCount = computePendingCount(state)
-  const text = pendingCount > 0 ? String(Math.min(pendingCount, 99)) : ""
-  await chrome.action.setBadgeText({ text })
-  await chrome.action.setBadgeBackgroundColor({
-    color: pendingCount > 0 ? "#d9480f" : "#4b5563",
-  })
+  const currentItems = [
+    ...((((state && state.epic) || {}).current || []).filter(Boolean)),
+    ...((((state && state.fab) || {}).current || []).filter(Boolean)),
+  ]
+  const indicatorState = getActionIndicatorState(currentItems)
+
+  await chrome.action.setBadgeText({ text: "" })
+
+  if (indicatorState === "idle") {
+    await chrome.action.setIcon({
+      path: ACTION_BASE_ICON_PATH,
+    })
+    return
+  }
+
+  try {
+    const imageData = await buildActionIconSet(ACTION_INDICATOR_COLORS[indicatorState])
+    await chrome.action.setIcon({
+      imageData,
+    })
+  } catch (_error) {
+    await chrome.action.setIcon({
+      path: ACTION_BASE_ICON_PATH,
+    })
+  }
+}
+
+function getActionIndicatorState(items) {
+  const currentItems = (items || []).filter(Boolean)
+  if (!currentItems.length) {
+    return "idle"
+  }
+
+  const allClaimed = currentItems.every((item) =>
+    ["claimed", "already-owned"].includes(item && item.claimResult),
+  )
+
+  if (allClaimed) {
+    return "claimed"
+  }
+
+  return "pending"
+}
+
+async function buildActionIconSet(dotColor) {
+  const bitmap = await getBaseActionIconBitmap()
+  const entries = await Promise.all(
+    ACTION_ICON_SIZES.map(async (size) => {
+      const canvas = new OffscreenCanvas(size, size)
+      const ctx = canvas.getContext("2d")
+      ctx.clearRect(0, 0, size, size)
+      ctx.drawImage(bitmap, 0, 0, size, size)
+
+      const radius = Math.max(2.5, size * 0.14)
+      const centerX = size - radius - Math.max(1.5, size * 0.1)
+      const centerY = size - radius - Math.max(1.5, size * 0.1)
+
+      ctx.beginPath()
+      ctx.arc(centerX, centerY, radius + Math.max(1.2, size * 0.04), 0, Math.PI * 2)
+      ctx.fillStyle = "#ffffff"
+      ctx.fill()
+
+      ctx.beginPath()
+      ctx.arc(centerX, centerY, radius, 0, Math.PI * 2)
+      ctx.fillStyle = dotColor
+      ctx.fill()
+
+      return [size, ctx.getImageData(0, 0, size, size)]
+    }),
+  )
+
+  return Object.fromEntries(entries)
+}
+
+async function getBaseActionIconBitmap() {
+  if (!baseActionIconBitmapPromise) {
+    baseActionIconBitmapPromise = fetch(chrome.runtime.getURL(ACTION_BASE_ICON_PATH))
+      .then((response) => response.blob())
+      .then((blob) => createImageBitmap(blob))
+  }
+
+  return await baseActionIconBitmapPromise
 }
 
 async function getPopupPayload() {
@@ -210,9 +289,10 @@ async function runCheckInternal({
   const previousState = await getState()
 
   const isManualTrigger = reason !== "alarm"
-  const isSiteSpecificRun = Boolean(forceClaimEpic || forceClaimFab)
-  const shouldProcessEpic = forceClaimEpic || !isSiteSpecificRun
-  const shouldProcessFab = forceClaimFab || !isSiteSpecificRun
+  const { shouldProcessEpic, shouldProcessFab } = getRunScope({
+    forceClaimEpic,
+    forceClaimFab,
+  })
 
   if (
     !settings.autoCheck &&
@@ -260,38 +340,37 @@ async function runCheckInternal({
       : []
 
     if (shouldProcessFab) {
-      if (shouldSkipFabAutoRun(previousState, {
-        isManualTrigger,
-        forceClaimFab,
-      })) {
-        fabCurrent = cloneFabItems(previousState && previousState.fab && previousState.fab.current)
-        const nextFabDeadline = pickFabCampaignEndDate(fabCurrent)
-        await appendDebugLog(
-          `Fab 当前批次已全部领取，截止前跳过自动执行：${nextFabDeadline || "未记录截止时间"}`,
-        )
-      } else {
-        const fabListings = await detectFabListings({
-          closeFinishedTabs: settings.closeFinishedTabs,
+      const fabListings = await detectFabListings({
+        closeFinishedTabs: settings.closeFinishedTabs,
+      })
+      const shouldSkipFabDetails =
+        !fabListings.challengeRequired &&
+        shouldSkipFabDetailInspection(fabListings.items, {
+          isManualTrigger,
+          forceClaimFab,
         })
-        await appendDebugLog(
-          fabListings.challengeRequired
-            ? "Fab 列表页触发 Cloudflare 验证"
-            : `Fab 限免列表数量：${fabListings.items.length}`,
-        )
-        fabCurrent = fabListings.challengeRequired
-          ? [
-              {
-                id: "fab-cloudflare-challenge",
-                title: "Fab 需要 Cloudflare 验证",
-                url: fabListings.url,
-                site: "fab",
-                inspectedAt: nowIso(),
-                claimResult: "challenge-required",
-                claimResultLabel: "需要 Cloudflare 验证",
-                claimMessage: "请在弹出的 Fab 标签页完成验证后，再次点击检查",
-                finalUrl: fabListings.url,
-              },
-            ]
+
+      await appendDebugLog(
+        fabListings.challengeRequired
+          ? "Fab 列表页触发 Cloudflare 验证"
+          : `Fab 限免列表数量：${fabListings.items.length}`,
+      )
+      fabCurrent = fabListings.challengeRequired
+        ? [
+            {
+              id: "fab-cloudflare-challenge",
+              title: "Fab 需要 Cloudflare 验证",
+              url: fabListings.url,
+              site: "fab",
+              inspectedAt: nowIso(),
+              claimResult: "challenge-required",
+              claimResultLabel: "需要 Cloudflare 验证",
+              claimMessage: "请在弹出的 Fab 标签页完成验证后，再次点击检查",
+              finalUrl: fabListings.url,
+            },
+          ]
+        : shouldSkipFabDetails
+          ? buildFabResultsFromListing(fabListings.items)
           : await inspectAndMaybeClaimOffers({
               site: "fab",
               offers: fabListings.items,
@@ -299,6 +378,12 @@ async function runCheckInternal({
                 forceClaimFab || settings.autoClaimFab ? "claim" : "inspect",
               closeFinishedTabs: settings.closeFinishedTabs,
             })
+
+      if (shouldSkipFabDetails) {
+        const nextFabDeadline = pickFabCampaignEndDate(fabCurrent)
+        await appendDebugLog(
+          `Fab 列表页确认当前批次已全部在库，截止前跳过详情页执行：${nextFabDeadline || "未记录截止时间"}`,
+        )
       }
     } else {
       await appendDebugLog("本次跳过 Fab 流程")
@@ -510,6 +595,7 @@ async function inspectAndMaybeClaimSingleOffer({
       ...offer,
       site,
       inspectedAt: nowIso(),
+      endDate: claimResult.pageEndDate || offer.endDate || null,
       claimResult: claimResult.status,
       claimResultLabel: claimResult.label,
       claimMessage: claimResult.message || null,
@@ -628,15 +714,24 @@ function formatAutomationTrace(step, response) {
 }
 
 async function appendDebugLog(message) {
-  const currentState = await getState()
-  const nextLog = [
-    ...((currentState && currentState.debugLog) || []),
-    `[${formatDebugTimestamp()}] ${message}`,
-  ].slice(-DEBUG_LOG_LIMIT)
+  const timestampText = formatDebugTimestamp()
+  debugLogWriteQueue = debugLogWriteQueue
+    .catch(() => {})
+    .then(async () => {
+      const currentState = await getState()
+      const nextLog = buildNextDebugLog(
+        currentState && currentState.debugLog,
+        message,
+        timestampText,
+        DEBUG_LOG_LIMIT,
+      )
 
-  await setState({
-    debugLog: nextLog,
-  })
+      await setState({
+        debugLog: nextLog,
+      })
+    })
+
+  await debugLogWriteQueue
 }
 
 function formatDebugTimestamp() {
@@ -726,78 +821,21 @@ async function getCandidateFrameIds(tabId, frameMode) {
   }
 }
 
-function pickBestFrameResponse(responses) {
-  return [...responses].sort((left, right) => {
-    const priorityDiff =
-      getResponsePriority(right && right.status) -
-      getResponsePriority(left && left.status)
-    if (priorityDiff !== 0) {
-      return priorityDiff
-    }
-
-    if ((left && left.frameId) === 0 && (right && right.frameId) !== 0) {
-      return 1
-    }
-
-    if ((right && right.frameId) === 0 && (left && left.frameId) !== 0) {
-      return -1
-    }
-
-    return 0
-  })[0]
-}
-
-function getResponsePriority(status) {
-  return RESPONSE_STATUS_PRIORITY[status] || 0
-}
-
-function shouldSkipFabAutoRun(previousState, options) {
-  if (!previousState || !previousState.fab || !Array.isArray(previousState.fab.current)) {
-    return false
-  }
-
-  if ((options && options.isManualTrigger) || (options && options.forceClaimFab)) {
-    return false
-  }
-
-  const currentItems = previousState.fab.current.filter(Boolean)
-  if (!currentItems.length) {
-    return false
-  }
-
-  if (
-    currentItems.some(
-      (item) => !["claimed", "already-owned"].includes(item && item.claimResult),
-    )
-  ) {
-    return false
-  }
-
-  const campaignEndDate = pickFabCampaignEndDate(currentItems)
-  if (!campaignEndDate) {
-    return false
-  }
-
-  const campaignEndMs = Date.parse(campaignEndDate)
-  if (!Number.isFinite(campaignEndMs)) {
-    return false
-  }
-
-  return Date.now() < campaignEndMs
-}
-
-function pickFabCampaignEndDate(items) {
-  const dates = (items || [])
-    .map((item) => item && item.endDate)
-    .filter(Boolean)
-    .sort()
-
-  return dates[0] || null
-}
-
 function cloneFabItems(items) {
   return (items || []).map((item) => ({
     ...item,
+  }))
+}
+
+function buildFabResultsFromListing(items) {
+  return cloneFabItems(items).map((item) => ({
+    ...item,
+    site: "fab",
+    inspectedAt: nowIso(),
+    claimResult: "already-owned",
+    claimResultLabel: "已在库中",
+    claimMessage: "Fab 列表页确认当前已在库中，跳过详情页执行",
+    finalUrl: item && item.url ? item.url : null,
   }))
 }
 

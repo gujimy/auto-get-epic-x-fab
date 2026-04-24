@@ -457,6 +457,30 @@
     return "unknown"
   }
 
+  function parseEpicProductEndDate(doc) {
+    const text = getDocumentText(doc)
+    const match = text.match(
+      /优惠截止于\s*(\d{4})[/-](\d{1,2})[/-](\d{1,2})\s+(\d{1,2}):(\d{2})/u,
+    )
+
+    if (!match) {
+      return null
+    }
+
+    const year = Number(match[1])
+    const monthIndex = Number(match[2]) - 1
+    const day = Number(match[3])
+    const hour = Number(match[4])
+    const minute = Number(match[5])
+
+    const candidate = new Date(year, monthIndex, day, hour, minute, 0, 0)
+    if (Number.isNaN(candidate.getTime())) {
+      return null
+    }
+
+    return candidate.toISOString()
+  }
+
   function extractFabPageState(doc) {
     if (isCloudflareChallengePage(doc)) {
       return "challenge-required"
@@ -667,6 +691,7 @@
     createIdFromUrl,
     dedupeBy,
     extractEpicPageState,
+    parseEpicProductEndDate,
     extractFabPageState,
     formatDateTime,
     formatResultLabel,

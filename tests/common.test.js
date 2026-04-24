@@ -212,3 +212,19 @@ test("parseFabCampaignEndDate parses campaign deadline from heading", () => {
   assert.ok(parsed)
   assert.equal(parsed.startsWith("2026-05-05T"), true)
 })
+
+test("parseEpicProductEndDate parses visible epic page deadline text", () => {
+  const fakeDocument = {
+    body: {
+      innerText: "立即获取 DOOMBLADE 优惠截止于2026/4/30 09:00",
+      textContent: "立即获取 DOOMBLADE 优惠截止于2026/4/30 09:00",
+    },
+    documentElement: {
+      innerHTML: "<div>优惠截止于2026/4/30 09:00</div>",
+    },
+  }
+
+  const parsed = common.parseEpicProductEndDate(fakeDocument)
+
+  assert.equal(parsed, "2026-04-30T01:00:00.000Z")
+})

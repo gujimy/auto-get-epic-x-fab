@@ -9,6 +9,7 @@ const {
   isEpicLoginPage,
   isSafeZeroPriceContext,
   normalizeText,
+  parseEpicProductEndDate,
   parseFabListingsFromDocument,
 } = EpicFabCommon
 
@@ -195,49 +196,56 @@ async function handleAutomationStep(message) {
 }
 
 async function handleEpicStep({ mode }) {
+  const pageEndDate = parseEpicProductEndDate(document)
+
   if (isCloudflareChallengePage(document)) {
     return result(
       "challenge-required",
       "Epic 当前出现 Cloudflare 验证，请手动完成后重试",
       0,
-      { keepTabOpen: true },
+      { keepTabOpen: true, pageEndDate },
     )
   }
 
   if (hasSuccessState()) {
-    return result("claimed", "检测到 Epic 订单已完成")
+    return result("claimed", "检测到 Epic 订单已完成", 0, { pageEndDate })
   }
 
   if (isEpicLoginPage(location.href)) {
     return result("login-required", "需要先登录 Epic 账号", 0, {
       keepTabOpen: true,
+      pageEndDate,
     })
   }
 
   const epicPurchaseButton = getEpicPurchaseCtaButton()
   if (isEpicOwnedPurchaseButton(epicPurchaseButton)) {
-    return result("already-owned", "检测到 Epic 按钮已显示已在库中")
+    return result("already-owned", "检测到 Epic 按钮已显示已在库中", 0, {
+      pageEndDate,
+    })
   }
 
   const state = extractEpicPageState(document)
   if (state === "already-owned") {
-    return result("already-owned", "检测到该游戏已在库中")
+    return result("already-owned", "检测到该游戏已在库中", 0, { pageEndDate })
   }
 
   if (mode === "inspect" && state === "claimable") {
-    return result("claimable", "检测到当前可领取")
+    return result("claimable", "检测到当前可领取", 0, { pageEndDate })
   }
 
   if (hasVisibleMatch(BUTTON_TEXT.epicOwned)) {
-    return result("already-owned", "检测到按钮已显示在库中")
+    return result("already-owned", "检测到按钮已显示在库中", 0, {
+      pageEndDate,
+    })
   }
 
   if (mode === "claim" && clickEpicGetButton(epicPurchaseButton)) {
-    return result("navigating", "已点击 Epic 获取按钮", 1400)
+    return result("navigating", "已点击 Epic 获取按钮", 1400, { pageEndDate })
   }
 
   if (mode === "claim" && clickFirstButton(BUTTON_TEXT.epicGet)) {
-    return result("navigating", "已点击 Epic 获取按钮", 1400)
+    return result("navigating", "已点击 Epic 获取按钮", 1400, { pageEndDate })
   }
 
   if (mode === "claim") {
@@ -246,6 +254,7 @@ async function handleEpicStep({ mode }) {
         "navigating",
         "Epic 订单页仍在加载，等待下订单按钮出现",
         1500,
+        { pageEndDate },
       )
     }
 
@@ -253,19 +262,23 @@ async function handleEpicStep({ mode }) {
       ensureAllCheckboxesChecked()
 
       if (await clickHostedPaymentConfirmButton()) {
-        return result("navigating", "已点击 Epic 托管结算页 Place Order 按钮", 1800)
+        return result("navigating", "已点击 Epic 托管结算页 Place Order 按钮", 1800, {
+          pageEndDate,
+        })
       }
 
       if (clickFirstButton(BUTTON_TEXT.epicCheckout)) {
-        return result("navigating", "已点击 Epic 去结算按钮", 1600)
+        return result("navigating", "已点击 Epic 去结算按钮", 1600, { pageEndDate })
       }
 
       if (clickFirstKnownSelector(EPIC_CHECKOUT_SELECTORS.confirmButton)) {
-        return result("navigating", "已点击 Epic Place Order 按钮", 1800)
+        return result("navigating", "已点击 Epic Place Order 按钮", 1800, {
+          pageEndDate,
+        })
       }
 
       if (clickFirstButton(BUTTON_TEXT.epicOrder)) {
-        return result("navigating", "已点击 Epic 确认订单按钮", 1800)
+        return result("navigating", "已点击 Epic 确认订单按钮", 1800, { pageEndDate })
       }
 
       if (isHostedPaymentCheckoutPage()) {
@@ -273,6 +286,7 @@ async function handleEpicStep({ mode }) {
           "navigating",
           "已进入 Epic 托管结算页，等待 Place Order 按钮可点击",
           1200,
+          { pageEndDate },
         )
       }
     }
@@ -282,15 +296,20 @@ async function handleEpicStep({ mode }) {
         "navigating",
         "Epic 购买流程进行中，等待订单完成",
         1500,
+        { pageEndDate },
       )
     }
   }
 
   if (state === "claimable") {
-    return result("claimable", "页面可领取，但未进入自动提交阶段")
+    return result("claimable", "页面可领取，但未进入自动提交阶段", 0, {
+      pageEndDate,
+    })
   }
 
-  return result("needs-manual", "未识别到 Epic 可自动操作按钮")
+  return result("needs-manual", "未识别到 Epic 可自动操作按钮", 0, {
+    pageEndDate,
+  })
 }
 
 async function handleFabStep({ mode }) {
