@@ -1,0 +1,39 @@
+# Local workflow / agent artifacts
+.dev/
+.spec-workflow/
+
+# Dependency directories
+node_modules/
+
+# Build and package outputs
+dist/
+build/
+release/
+out/
+*.zip
+*.crx
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Test / coverage outputs
+coverage/
+.nyc_output/
+
+# Environment files
+.env
+.env.*
+
+# Editor / IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini

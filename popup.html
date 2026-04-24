@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
+    <title>Epic/Fab 每周免费助手</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body class="popup">
+    <div class="shell">
+      <main id="homeView">
+        <header class="hero">
+          <p class="eyebrow">Epic + Fab</p>
+          <h1>每周免费助手</h1>
+          <p class="meta" id="summaryText">正在读取状态...</p>
+        </header>
+
+        <section class="panel actions">
+          <button id="checkNowButton" class="primary">检查一次</button>
+          <button id="claimEpicButton">只领 Epic</button>
+          <button id="claimFabButton">只领 Fab</button>
+          <button id="openOptionsButton">设置</button>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <button id="openEpicPageButton" class="panel-link" type="button">Epic 本周免费</button>
+            <span id="epicCount" class="badge">0</span>
+          </div>
+          <div id="epicList" class="list empty">暂无数据</div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <button id="openFabPageButton" class="panel-link" type="button">Fab 限时免费</button>
+            <span id="fabCount" class="badge">0</span>
+          </div>
+          <div id="fabList" class="list empty">暂无数据</div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>下周预告</h2>
+          </div>
+          <div id="upcomingList" class="list empty">暂无数据</div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>调试日志</h2>
+          </div>
+          <div id="debugList" class="list empty">暂无日志，请先执行一次“只领 Fab”。</div>
+        </section>
+      </main>
+
+      <main id="settingsView" class="view-hidden">
+        <header class="hero">
+          <p class="eyebrow">设置</p>
+          <h1>自动化偏好</h1>
+          <p class="meta" id="settingsSummaryText">建议先确保浏览器里已经登录 Epic 与 Fab。</p>
+        </header>
+
+        <section class="panel actions settings-actions">
+          <button id="backToHomeButton">返回首页</button>
+          <button id="saveSettingsButton" class="primary">保存设置</button>
+        </section>
+
+        <section class="panel">
+          <div class="settings-form">
+            <label class="checkbox">
+              <input id="autoCheck" type="checkbox" />
+              <span>开启自动检测</span>
+            </label>
+
+            <label class="checkbox">
+              <input id="autoClaimEpic" type="checkbox" />
+              <span>自动领取 Epic 周免</span>
+            </label>
+
+            <label class="checkbox">
+              <input id="autoClaimFab" type="checkbox" />
+              <span>自动领取 Fab 限免</span>
+            </label>
+
+            <label class="checkbox">
+              <input id="desktopNotifications" type="checkbox" />
+              <span>开启浏览器通知</span>
+            </label>
+
+            <label class="checkbox">
+              <input id="closeFinishedTabs" type="checkbox" />
+              <span>执行完成后自动关闭后台标签页</span>
+            </label>
+
+            <label class="field">
+              <span>检测间隔（分钟）</span>
+              <input id="checkIntervalMinutes" type="number" min="30" step="30" />
+            </label>
+
+            <label class="field">
+              <span>Epic 区域代码</span>
+              <input id="country" type="text" maxlength="2" />
+            </label>
+
+            <label class="field">
+              <span>Epic 语言</span>
+              <select id="locale">
+                <option value="zh-CN">简体中文</option>
+                <option value="en-US">English (US)</option>
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <section class="panel">
+          <p id="settingsStatusText" class="meta">尚未保存</p>
+        </section>
+      </main>
+    </div>
+
+    <script src="common.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

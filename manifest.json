@@ -1,0 +1,60 @@
+{
+  "manifest_version": 3,
+  "name": "Epic/Fab 每周免费助手",
+  "version": "0.1.0",
+  "description": "自动检测 Epic 每周免费游戏和 Fab 限免资产，并在已登录状态下尝试自动领取。",
+  "permissions": [
+    "alarms",
+    "notifications",
+    "storage",
+    "tabs",
+    "sidePanel",
+    "webNavigation"
+  ],
+  "host_permissions": [
+    "https://*.epicgames.com/*",
+    "https://www.fab.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "icons": {
+    "16": "icon.png",
+    "32": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  },
+  "action": {
+    "default_title": "Epic/Fab 每周免费助手"
+  },
+  "side_panel": {
+    "default_path": "popup.html"
+  },
+  "options_page": "options.html",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.epicgames.com/*",
+        "https://www.fab.com/*"
+      ],
+      "js": [
+        "common.js",
+        "content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "https://*.epicgames.com/*",
+        "https://www.fab.com/*"
+      ],
+      "js": [
+        "turnstile-patch.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
+    }
+  ]
+}
