@@ -68,6 +68,7 @@
   const CHECKOUT_ZERO_PATTERNS = [
     /免费/iu,
     /\bFREE\b/iu,
+    /-100%/u,
     /\$0(?:\.00)?/u,
     /US\$0(?:\.00)?/u,
     /\b0(?:\.00)?\b/u,

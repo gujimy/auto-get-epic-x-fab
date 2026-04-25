@@ -105,3 +105,57 @@ test("shouldSkipFabDetailInspection only skips auto runs with owned items before
     false,
   )
 })
+
+test("shouldRejectConcurrentRun rejects manual claim while inspect run is active", () => {
+  assert.equal(
+    backgroundLogic.shouldRejectConcurrentRun(
+      {
+        reason: "alarm",
+        forceClaimEpic: false,
+        forceClaimFab: false,
+      },
+      {
+        reason: "manual-epic",
+        forceClaimEpic: true,
+        forceClaimFab: false,
+      },
+    ),
+    true,
+  )
+})
+
+test("shouldRejectConcurrentRun allows duplicate claim request for same site", () => {
+  assert.equal(
+    backgroundLogic.shouldRejectConcurrentRun(
+      {
+        reason: "manual-fab",
+        forceClaimEpic: false,
+        forceClaimFab: true,
+      },
+      {
+        reason: "manual-fab",
+        forceClaimEpic: false,
+        forceClaimFab: true,
+      },
+    ),
+    false,
+  )
+})
+
+test("shouldRejectConcurrentRun rejects different claim scope", () => {
+  assert.equal(
+    backgroundLogic.shouldRejectConcurrentRun(
+      {
+        reason: "manual-epic",
+        forceClaimEpic: true,
+        forceClaimFab: false,
+      },
+      {
+        reason: "manual-fab",
+        forceClaimEpic: false,
+        forceClaimFab: true,
+      },
+    ),
+    true,
+  )
+})

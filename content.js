@@ -258,6 +258,15 @@ async function handleEpicStep({ mode }) {
       )
     }
 
+    if (isHostedPaymentCheckoutPage() && !shouldAttemptOrderSubmission()) {
+      return result(
+        "needs-manual",
+        "已进入 Epic 结算页，但未确认零价订单，停止自动提交",
+        0,
+        { pageEndDate },
+      )
+    }
+
     if (shouldAttemptEpicOrderSubmission()) {
       ensureAllCheckboxesChecked()
 
@@ -359,6 +368,13 @@ async function handleFabStep({ mode }) {
     }
 
     if (isHostedPaymentCheckoutPage()) {
+      if (!shouldAttemptOrderSubmission()) {
+        return result(
+          "needs-manual",
+          "已进入 Fab 结算页，但未确认零价订单，停止自动提交",
+        )
+      }
+
       ensureAllCheckboxesChecked()
 
       if (await clickHostedPaymentConfirmButton()) {
@@ -669,35 +685,10 @@ function hasFabSuccessState() {
 }
 
 function shouldAttemptOrderSubmission() {
-  if (isHostedPaymentCheckoutPage()) {
-    return true
-  }
-
-  if (isSafeZeroPriceContext(document)) {
-    return true
-  }
-
-  const text = normalizeText(document.body && document.body.innerText)
-  return [
-    /免费/iu,
-    /\bFREE\b/iu,
-    /-100%/u,
-    /\$0(?:\.00)?/u,
-    /US\$0(?:\.00)?/u,
-    /TOTAL.{0,24}(?:FREE|0(?:\.00)?)/iu,
-    /YOU PAY TODAY.{0,24}(?:FREE|0(?:\.00)?)/iu,
-    /合计.{0,12}(?:免费|0(?:\.00)?)/iu,
-    /总计.{0,12}(?:免费|0(?:\.00)?)/iu,
-    /应付.{0,12}(?:免费|0(?:\.00)?)/iu,
-    /订单总额.{0,12}(?:免费|0(?:\.00)?)/iu,
-  ].some((pattern) => pattern.test(text))
+  return isSafeZeroPriceContext(document)
 }
 
 function shouldAttemptEpicOrderSubmission() {
-  if (findFirstKnownSelector(EPIC_CHECKOUT_SELECTORS.confirmContainer)) {
-    return true
-  }
-
   return shouldAttemptOrderSubmission()
 }
 

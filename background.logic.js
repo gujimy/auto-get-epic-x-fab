@@ -107,12 +107,37 @@
     return nowMs < campaignEndMs
   }
 
+  function runRequestsClaim(options) {
+    return Boolean(
+      options && (options.forceClaimEpic || options.forceClaimFab),
+    )
+  }
+
+  function shouldRejectConcurrentRun(activeOptions, nextOptions) {
+    if (!runRequestsClaim(nextOptions)) {
+      return false
+    }
+
+    if (!runRequestsClaim(activeOptions)) {
+      return true
+    }
+
+    return (
+      Boolean(activeOptions && activeOptions.forceClaimEpic) !==
+        Boolean(nextOptions && nextOptions.forceClaimEpic) ||
+      Boolean(activeOptions && activeOptions.forceClaimFab) !==
+        Boolean(nextOptions && nextOptions.forceClaimFab)
+    )
+  }
+
   return {
     buildNextDebugLog,
     getResponsePriority,
     getRunScope,
     pickBestFrameResponse,
     pickFabCampaignEndDate,
+    runRequestsClaim,
+    shouldRejectConcurrentRun,
     shouldSkipFabDetailInspection,
   }
 })

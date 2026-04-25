@@ -18,6 +18,7 @@ const {
   getRunScope,
   pickBestFrameResponse,
   pickFabCampaignEndDate,
+  shouldRejectConcurrentRun,
   shouldSkipFabDetailInspection,
 } = EpicFabBackgroundLogic
 
@@ -25,7 +26,7 @@ const CHECK_ALARM_NAME = "epic-fab-weekly-check"
 const MAX_AUTOMATION_STEPS = 20
 const DEBUG_LOG_LIMIT = 200
 const OFFER_CONCURRENCY = 3
-const ACTION_BASE_ICON_PATH = "icon.ico"
+const ACTION_BASE_ICON_PATH = "icon.png"
 const ACTION_ICON_SIZES = [16, 32, 48, 128]
 const ACTION_INDICATOR_COLORS = {
   pending: "#d9a404",
@@ -33,6 +34,7 @@ const ACTION_INDICATOR_COLORS = {
 }
 
 let activeRunPromise = null
+let activeRunOptions = null
 let debugLogWriteQueue = Promise.resolve()
 let baseActionIconBitmapPromise = null
 
@@ -161,7 +163,12 @@ async function setState(patch) {
     [STORAGE_KEYS.state]: nextState,
   })
 
-  await updateBadge(nextState)
+  try {
+    await updateBadge(nextState)
+  } catch (error) {
+    console.warn("更新扩展图标失败，已保留状态写入结果", error)
+  }
+
   return nextState
 }
 
@@ -265,19 +272,35 @@ async function getPopupPayload() {
 }
 
 async function runCheck(options) {
+  const normalizedOptions = normalizeRunOptions(options)
+
   if (activeRunPromise) {
+    if (shouldRejectConcurrentRun(activeRunOptions, normalizedOptions)) {
+      throw new Error("已有检查任务正在运行，请等待完成后再重新点击领取")
+    }
+
     return await activeRunPromise
   }
 
-  activeRunPromise = runCheckInternal(options)
+  activeRunOptions = normalizedOptions
+  activeRunPromise = runCheckInternal(normalizedOptions)
     .catch((error) => {
       throw error
     })
     .finally(() => {
       activeRunPromise = null
+      activeRunOptions = null
     })
 
   return await activeRunPromise
+}
+
+function normalizeRunOptions(options) {
+  return {
+    reason: (options && options.reason) || "unknown",
+    forceClaimEpic: Boolean(options && options.forceClaimEpic),
+    forceClaimFab: Boolean(options && options.forceClaimFab),
+  }
 }
 
 async function runCheckInternal({

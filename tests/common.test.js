@@ -129,6 +129,28 @@ test("isCloudflareChallengePage detects Cloudflare challenge text", () => {
   assert.equal(common.isCloudflareChallengePage(fakeDocument), true)
 })
 
+test("isSafeZeroPriceContext accepts explicit zero discount checkout", () => {
+  const fakeDocument = {
+    body: {
+      innerText: "Order Summary Limited-Time Free -100% You Pay Today US$0.00",
+      textContent: "Order Summary Limited-Time Free -100% You Pay Today US$0.00",
+    },
+  }
+
+  assert.equal(common.isSafeZeroPriceContext(fakeDocument), true)
+})
+
+test("isSafeZeroPriceContext rejects checkout pages with payment risk", () => {
+  const fakeDocument = {
+    body: {
+      innerText: "Order Summary You Pay Today US$0.00 Payment Method",
+      textContent: "Order Summary You Pay Today US$0.00 Payment Method",
+    },
+  }
+
+  assert.equal(common.isSafeZeroPriceContext(fakeDocument), false)
+})
+
 test("parseFabListingsFromDocument marks owned item without opening detail page", () => {
   const heading = {
     textContent: "Limited-Time Free (Until May 5 at 9:59 AM ET)",
