@@ -35,7 +35,6 @@ const elements = {
   autoClaimFab: document.getElementById("autoClaimFab"),
   desktopNotifications: document.getElementById("desktopNotifications"),
   closeFinishedTabs: document.getElementById("closeFinishedTabs"),
-  checkIntervalMinutes: document.getElementById("checkIntervalMinutes"),
   country: document.getElementById("country"),
   locale: document.getElementById("locale"),
 }
@@ -170,7 +169,6 @@ async function loadSettings() {
   elements.autoClaimFab.checked = Boolean(settings.autoClaimFab)
   elements.desktopNotifications.checked = Boolean(settings.desktopNotifications)
   elements.closeFinishedTabs.checked = Boolean(settings.closeFinishedTabs)
-  elements.checkIntervalMinutes.value = String(settings.checkIntervalMinutes)
   elements.country.value = settings.country
   elements.locale.value = settings.locale
   elements.settingsStatusText.textContent = "已加载当前设置"
@@ -189,7 +187,6 @@ async function saveSettings() {
         autoClaimFab: elements.autoClaimFab.checked,
         desktopNotifications: elements.desktopNotifications.checked,
         closeFinishedTabs: elements.closeFinishedTabs.checked,
-        checkIntervalMinutes: Number(elements.checkIntervalMinutes.value) || 360,
         country: String(elements.country.value || "US").toUpperCase(),
         locale: elements.locale.value || "zh-CN",
       },

@@ -8,7 +8,6 @@ const form = {
   autoClaimFab: document.getElementById("autoClaimFab"),
   desktopNotifications: document.getElementById("desktopNotifications"),
   closeFinishedTabs: document.getElementById("closeFinishedTabs"),
-  checkIntervalMinutes: document.getElementById("checkIntervalMinutes"),
   country: document.getElementById("country"),
   locale: document.getElementById("locale"),
   saveButton: document.getElementById("saveButton"),
@@ -22,7 +21,6 @@ form.saveButton.addEventListener("click", async () => {
     autoClaimFab: form.autoClaimFab.checked,
     desktopNotifications: form.desktopNotifications.checked,
     closeFinishedTabs: form.closeFinishedTabs.checked,
-    checkIntervalMinutes: Number(form.checkIntervalMinutes.value) || 360,
     country: String(form.country.value || "US").toUpperCase(),
     locale: form.locale.value || "zh-CN",
   }
@@ -55,7 +53,6 @@ async function load() {
   form.autoClaimFab.checked = Boolean(settings.autoClaimFab)
   form.desktopNotifications.checked = Boolean(settings.desktopNotifications)
   form.closeFinishedTabs.checked = Boolean(settings.closeFinishedTabs)
-  form.checkIntervalMinutes.value = String(settings.checkIntervalMinutes)
   form.country.value = settings.country
   form.locale.value = settings.locale
   form.statusText.textContent = "已加载当前设置"

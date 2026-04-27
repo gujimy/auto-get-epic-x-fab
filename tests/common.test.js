@@ -7,11 +7,13 @@ test("mergeSettings merges overrides", () => {
   const settings = common.mergeSettings({
     country: "CN",
     autoClaimFab: false,
+    checkIntervalMinutes: 30,
   })
 
   assert.equal(settings.country, "CN")
   assert.equal(settings.autoClaimFab, false)
   assert.equal(settings.autoClaimEpic, true)
+  assert.equal("checkIntervalMinutes" in settings, false)
 })
 
 test("parseEpicPromotionsResponse extracts current and upcoming offers", () => {

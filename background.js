@@ -14,15 +14,21 @@ const {
   serializeError,
 } = EpicFabCommon
 const {
+  buildSuccessfulExecutionRecord,
   buildNextDebugLog,
+  computeNextAlarmDelayMinutes,
+  getSiteAutoSkipInfo,
   getRunScope,
+  isManualRunReason,
   pickBestFrameResponse,
   pickFabCampaignEndDate,
   shouldRejectConcurrentRun,
+  shouldSkipSiteAutoRun,
   shouldSkipFabDetailInspection,
 } = EpicFabBackgroundLogic
 
 const CHECK_ALARM_NAME = "epic-fab-weekly-check"
+const DEFAULT_CHECK_INTERVAL_MINUTES = 360
 const MAX_AUTOMATION_STEPS = 20
 const DEBUG_LOG_LIMIT = 200
 const OFFER_CONCURRENCY = 3
@@ -146,6 +152,7 @@ async function getState() {
       lastCheckAt: null,
       epic: { current: [], upcoming: [] },
       fab: { current: [], upcoming: [] },
+      executionRecords: {},
       lastError: null,
       debugLog: [],
     }
@@ -173,11 +180,18 @@ async function setState(patch) {
 }
 
 async function scheduleAlarm() {
-  const settings = await getSettings()
+  const state = await getState()
+  const delayInMinutes = computeNextAlarmDelayMinutes(
+    state && state.executionRecords,
+    {
+      defaultDelayMinutes: 1,
+    },
+  )
+
   await chrome.alarms.clear(CHECK_ALARM_NAME)
   await chrome.alarms.create(CHECK_ALARM_NAME, {
-    delayInMinutes: 1,
-    periodInMinutes: Math.max(30, Number(settings.checkIntervalMinutes) || 360),
+    delayInMinutes,
+    periodInMinutes: DEFAULT_CHECK_INTERVAL_MINUTES,
   })
 }
 
@@ -303,6 +317,39 @@ function normalizeRunOptions(options) {
   }
 }
 
+function updateSiteExecutionRecord(records, site, nextRecord, options) {
+  const nextRecords = { ...(records || {}) }
+
+  if (nextRecord) {
+    nextRecords[site] = nextRecord
+    return nextRecords
+  }
+
+  const existingRecord = nextRecords[site]
+  const shouldPreserveFutureRecord =
+    options &&
+    options.preserveFutureRecord &&
+    shouldSkipSiteAutoRun(existingRecord, {
+      nowMs: options.nowMs,
+    })
+
+  if (!shouldPreserveFutureRecord) {
+    delete nextRecords[site]
+  }
+
+  return nextRecords
+}
+
+async function appendSiteAutoSkipLog(site, skipInfo) {
+  if (!skipInfo || !skipInfo.shouldSkip) {
+    return
+  }
+
+  await appendDebugLog(
+    `${SITE_LABELS[site]} 本批次已完成，未到下次可领取时间，跳过自动执行：${skipInfo.nextAutoRunAt}`,
+  )
+}
+
 async function runCheckInternal({
   reason,
   forceClaimEpic,
@@ -311,11 +358,34 @@ async function runCheckInternal({
   const settings = await getSettings()
   const previousState = await getState()
 
-  const isManualTrigger = reason !== "alarm"
-  const { shouldProcessEpic, shouldProcessFab } = getRunScope({
+  const isManualTrigger = isManualRunReason(reason)
+  const nowMs = Date.now()
+  const runScope = getRunScope({
     forceClaimEpic,
     forceClaimFab,
   })
+  const epicSkipInfo = getSiteAutoSkipInfo(
+    previousState && previousState.executionRecords,
+    "epic",
+    {
+      isManualTrigger,
+      forceClaim: forceClaimEpic,
+      nowMs,
+    },
+  )
+  const fabSkipInfo = getSiteAutoSkipInfo(
+    previousState && previousState.executionRecords,
+    "fab",
+    {
+      isManualTrigger,
+      forceClaim: forceClaimFab,
+      nowMs,
+    },
+  )
+  const shouldProcessEpic =
+    runScope.shouldProcessEpic && !epicSkipInfo.shouldSkip
+  const shouldProcessFab =
+    runScope.shouldProcessFab && !fabSkipInfo.shouldSkip
 
   if (
     !settings.autoCheck &&
@@ -323,6 +393,21 @@ async function runCheckInternal({
     !forceClaimEpic &&
     !forceClaimFab
   ) {
+    return await getPopupPayload()
+  }
+
+  if (!shouldProcessEpic && !shouldProcessFab) {
+    await setState({
+      running: false,
+      lastError: null,
+      lastRunReason: reason,
+      lastRunSkippedAt: nowIso(),
+      debugLog: [],
+    })
+    await appendSiteAutoSkipLog("epic", epicSkipInfo)
+    await appendSiteAutoSkipLog("fab", fabSkipInfo)
+    await appendDebugLog("本次自动任务已跳过，等待下次可领取时间")
+    await scheduleAlarm()
     return await getPopupPayload()
   }
 
@@ -355,7 +440,11 @@ async function runCheckInternal({
         closeFinishedTabs: settings.closeFinishedTabs,
       })
     } else {
-      await appendDebugLog("本次跳过 Epic 流程")
+      if (runScope.shouldProcessEpic && epicSkipInfo.shouldSkip) {
+        await appendSiteAutoSkipLog("epic", epicSkipInfo)
+      } else {
+        await appendDebugLog("本次跳过 Epic 流程")
+      }
     }
 
     let fabCurrent = previousState && previousState.fab && previousState.fab.current
@@ -409,13 +498,78 @@ async function runCheckInternal({
         )
       }
     } else {
-      await appendDebugLog("本次跳过 Fab 流程")
+      if (runScope.shouldProcessFab && fabSkipInfo.shouldSkip) {
+        await appendSiteAutoSkipLog("fab", fabSkipInfo)
+      } else {
+        await appendDebugLog("本次跳过 Fab 流程")
+      }
     }
 
-    const nextState = await setState({
+    const finishedAt = nowIso()
+    const finishedMs = Date.parse(finishedAt)
+    let executionRecords =
+      previousState && previousState.executionRecords
+        ? previousState.executionRecords
+        : {}
+
+    if (shouldProcessEpic) {
+      const epicRecord = buildSuccessfulExecutionRecord(
+        "epic",
+        epicCurrent,
+        epicUpcoming,
+        {
+          nowMs: finishedMs,
+          recordedAt: finishedAt,
+        },
+      )
+      executionRecords = updateSiteExecutionRecord(
+        executionRecords,
+        "epic",
+        epicRecord,
+        {
+          nowMs: finishedMs,
+          preserveFutureRecord: isManualTrigger,
+        },
+      )
+
+      if (epicRecord) {
+        await appendDebugLog(
+          `Epic 本批次领取状态已完成，下次自动执行时间：${epicRecord.nextAutoRunAt}`,
+        )
+      }
+    }
+
+    if (shouldProcessFab) {
+      const fabRecord = buildSuccessfulExecutionRecord(
+        "fab",
+        fabCurrent,
+        [],
+        {
+          nowMs: finishedMs,
+          recordedAt: finishedAt,
+        },
+      )
+      executionRecords = updateSiteExecutionRecord(
+        executionRecords,
+        "fab",
+        fabRecord,
+        {
+          nowMs: finishedMs,
+          preserveFutureRecord: isManualTrigger,
+        },
+      )
+
+      if (fabRecord) {
+        await appendDebugLog(
+          `Fab 本批次领取状态已完成，下次自动执行时间：${fabRecord.nextAutoRunAt}`,
+        )
+      }
+    }
+
+    await setState({
       running: false,
-      lastCheckAt: nowIso(),
-      lastRunFinishedAt: nowIso(),
+      lastCheckAt: finishedAt,
+      lastRunFinishedAt: finishedAt,
       epic: {
         current: epicCurrent,
         upcoming: epicUpcoming,
@@ -424,12 +578,15 @@ async function runCheckInternal({
         current: fabCurrent,
         upcoming: [],
       },
+      executionRecords,
       lastError: null,
     })
     await appendDebugLog("本次任务执行完成")
+    await scheduleAlarm()
 
-    await maybeNotify(settings, nextState)
-    return { settings, state: nextState }
+    const latestState = await getState()
+    await maybeNotify(settings, latestState)
+    return { settings, state: latestState }
   } catch (error) {
     await appendDebugLog(`任务执行失败：${serializeError(error)}`)
     const failedState = await setState({
@@ -676,6 +833,7 @@ async function driveAutomation({ tabId, site, mode, offer }) {
       label: response.label,
       message: response.message,
       finalUrl: response.url,
+      pageEndDate: response.pageEndDate || null,
       keepTabOpen: Boolean(response.keepTabOpen),
       trace,
     }

@@ -11,7 +11,6 @@
     autoCheck: true,
     autoClaimEpic: true,
     autoClaimFab: true,
-    checkIntervalMinutes: 360,
     locale: "zh-CN",
     country: "US",
     desktopNotifications: true,
@@ -115,7 +114,16 @@
   }
 
   function mergeSettings(overrides) {
-    return { ...DEFAULT_SETTINGS, ...(overrides || {}) }
+    const merged = { ...DEFAULT_SETTINGS }
+    const source = overrides || {}
+
+    for (const key of Object.keys(DEFAULT_SETTINGS)) {
+      if (Object.prototype.hasOwnProperty.call(source, key)) {
+        merged[key] = source[key]
+      }
+    }
+
+    return merged
   }
 
   function nowIso() {

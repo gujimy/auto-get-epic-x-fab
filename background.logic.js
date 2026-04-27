@@ -18,6 +18,9 @@
     error: 10,
     unknown: 0,
   }
+  const COMPLETED_CLAIM_STATUSES = new Set(["claimed", "already-owned"])
+  const DEFAULT_ALARM_DELAY_MINUTES = 1
+  const MANAGED_SITES = ["epic", "fab"]
 
   function getRunScope(options) {
     const forceClaimEpic = Boolean(options && options.forceClaimEpic)
@@ -70,6 +73,150 @@
       .sort()
 
     return dates[0] || null
+  }
+
+  function isCompletedClaimStatus(status) {
+    return COMPLETED_CLAIM_STATUSES.has(status)
+  }
+
+  function getItemResultStatus(item) {
+    return item && (item.claimResult || item.status)
+  }
+
+  function areAllCurrentItemsCompleted(items) {
+    const currentItems = (items || []).filter(Boolean)
+    return (
+      currentItems.length > 0 &&
+      currentItems.every((item) =>
+        isCompletedClaimStatus(getItemResultStatus(item)),
+      )
+    )
+  }
+
+  function parseFutureTime(value, nowMs) {
+    const parsedMs = Date.parse(value)
+    if (!Number.isFinite(parsedMs) || parsedMs <= nowMs) {
+      return null
+    }
+
+    return {
+      value,
+      timeMs: parsedMs,
+    }
+  }
+
+  function pickNextAutoRunAt(currentItems, upcomingItems, options) {
+    const nowMs =
+      Number.isFinite(options && options.nowMs) ? Number(options.nowMs) : Date.now()
+    const candidates = []
+
+    for (const item of (currentItems || []).filter(Boolean)) {
+      const futureEnd = parseFutureTime(item.endDate, nowMs)
+      if (futureEnd) {
+        candidates.push(futureEnd)
+      }
+    }
+
+    for (const item of (upcomingItems || []).filter(Boolean)) {
+      const futureStart = parseFutureTime(item.startDate, nowMs)
+      if (futureStart) {
+        candidates.push(futureStart)
+      }
+    }
+
+    candidates.sort((left, right) => left.timeMs - right.timeMs)
+    return candidates[0] ? candidates[0].value : null
+  }
+
+  function buildSuccessfulExecutionRecord(site, currentItems, upcomingItems, options) {
+    if (!areAllCurrentItemsCompleted(currentItems)) {
+      return null
+    }
+
+    const nowMs =
+      Number.isFinite(options && options.nowMs) ? Number(options.nowMs) : Date.now()
+    const recordedAt =
+      (options && options.recordedAt) || new Date(nowMs).toISOString()
+    const nextAutoRunAt = pickNextAutoRunAt(currentItems, upcomingItems, {
+      nowMs,
+    })
+
+    if (!nextAutoRunAt) {
+      return null
+    }
+
+    return {
+      site,
+      lastSuccessAt: recordedAt,
+      nextAutoRunAt,
+      itemCount: (currentItems || []).filter(Boolean).length,
+      itemIds: (currentItems || [])
+        .filter(Boolean)
+        .map((item) => item.id || item.url || item.title)
+        .filter(Boolean),
+    }
+  }
+
+  function isManualRunReason(reason) {
+    return /^manual(?:-|$)/u.test(String(reason || ""))
+  }
+
+  function shouldSkipSiteAutoRun(record, options) {
+    if (options && (options.isManualTrigger || options.forceClaim)) {
+      return false
+    }
+
+    const nextAutoRunAt = record && record.nextAutoRunAt
+    const nextAutoRunMs = Date.parse(nextAutoRunAt)
+    if (!Number.isFinite(nextAutoRunMs)) {
+      return false
+    }
+
+    const nowMs =
+      Number.isFinite(options && options.nowMs) ? Number(options.nowMs) : Date.now()
+
+    return nowMs < nextAutoRunMs
+  }
+
+  function getSiteAutoSkipInfo(records, site, options) {
+    const record = records && records[site]
+    const shouldSkip = shouldSkipSiteAutoRun(record, options)
+
+    return {
+      shouldSkip,
+      nextAutoRunAt: shouldSkip ? record.nextAutoRunAt : null,
+      record: record || null,
+    }
+  }
+
+  function computeNextAlarmDelayMinutes(records, options) {
+    const nowMs =
+      Number.isFinite(options && options.nowMs) ? Number(options.nowMs) : Date.now()
+    const defaultDelayMinutes = Math.max(
+      1,
+      Number(options && options.defaultDelayMinutes) || DEFAULT_ALARM_DELAY_MINUTES,
+    )
+    const sites =
+      Array.isArray(options && options.sites) && options.sites.length
+        ? options.sites
+        : MANAGED_SITES
+    const futureTimes = []
+
+    for (const site of sites) {
+      const record = records && records[site]
+      const nextAutoRunMs = Date.parse(record && record.nextAutoRunAt)
+      if (!Number.isFinite(nextAutoRunMs) || nextAutoRunMs <= nowMs) {
+        return defaultDelayMinutes
+      }
+
+      futureTimes.push(nextAutoRunMs)
+    }
+
+    const earliestMs = Math.min(...futureTimes)
+    return Math.max(
+      defaultDelayMinutes,
+      Math.ceil((earliestMs - nowMs) / 60000),
+    )
   }
 
   function isFabAlreadyOwnedItem(item) {
@@ -131,13 +278,20 @@
   }
 
   return {
+    areAllCurrentItemsCompleted,
+    buildSuccessfulExecutionRecord,
     buildNextDebugLog,
+    computeNextAlarmDelayMinutes,
+    getSiteAutoSkipInfo,
     getResponsePriority,
     getRunScope,
+    isManualRunReason,
     pickBestFrameResponse,
     pickFabCampaignEndDate,
+    pickNextAutoRunAt,
     runRequestsClaim,
     shouldRejectConcurrentRun,
+    shouldSkipSiteAutoRun,
     shouldSkipFabDetailInspection,
   }
 })

@@ -106,6 +106,144 @@ test("shouldSkipFabDetailInspection only skips auto runs with owned items before
   )
 })
 
+test("buildSuccessfulExecutionRecord records next auto run after completed batch", () => {
+  const record = backgroundLogic.buildSuccessfulExecutionRecord(
+    "epic",
+    [
+      {
+        id: "game-1",
+        claimResult: "claimed",
+        endDate: "2026-04-30T15:00:00.000Z",
+      },
+      {
+        id: "game-2",
+        claimResult: "already-owned",
+        endDate: "2026-04-30T15:00:00.000Z",
+      },
+    ],
+    [
+      {
+        id: "next-game",
+        startDate: "2026-04-30T15:00:00.000Z",
+      },
+    ],
+    {
+      nowMs: Date.parse("2026-04-24T00:00:00.000Z"),
+      recordedAt: "2026-04-24T00:00:00.000Z",
+    },
+  )
+
+  assert.equal(record.site, "epic")
+  assert.equal(record.itemCount, 2)
+  assert.deepEqual(record.itemIds, ["game-1", "game-2"])
+  assert.equal(record.lastSuccessAt, "2026-04-24T00:00:00.000Z")
+  assert.equal(record.nextAutoRunAt, "2026-04-30T15:00:00.000Z")
+})
+
+test("buildSuccessfulExecutionRecord ignores unfinished current batch", () => {
+  const record = backgroundLogic.buildSuccessfulExecutionRecord(
+    "fab",
+    [
+      {
+        id: "fab-1",
+        claimResult: "claimed",
+        endDate: "2026-05-05T13:59:00.000Z",
+      },
+      {
+        id: "fab-2",
+        claimResult: "claimable",
+        endDate: "2026-05-05T13:59:00.000Z",
+      },
+    ],
+    [],
+    {
+      nowMs: Date.parse("2026-04-24T00:00:00.000Z"),
+    },
+  )
+
+  assert.equal(record, null)
+})
+
+test("shouldSkipSiteAutoRun skips only automatic runs before next auto time", () => {
+  const record = {
+    nextAutoRunAt: "2026-04-30T15:00:00.000Z",
+  }
+  const nowMs = Date.parse("2026-04-24T00:00:00.000Z")
+
+  assert.equal(
+    backgroundLogic.shouldSkipSiteAutoRun(record, {
+      nowMs,
+      isManualTrigger: false,
+      forceClaim: false,
+    }),
+    true,
+  )
+
+  assert.equal(
+    backgroundLogic.shouldSkipSiteAutoRun(record, {
+      nowMs,
+      isManualTrigger: true,
+      forceClaim: false,
+    }),
+    false,
+  )
+
+  assert.equal(
+    backgroundLogic.shouldSkipSiteAutoRun(record, {
+      nowMs,
+      isManualTrigger: false,
+      forceClaim: true,
+    }),
+    false,
+  )
+
+  assert.equal(
+    backgroundLogic.shouldSkipSiteAutoRun(record, {
+      nowMs: Date.parse("2026-05-01T00:00:00.000Z"),
+      isManualTrigger: false,
+      forceClaim: false,
+    }),
+    false,
+  )
+})
+
+test("computeNextAlarmDelayMinutes delays alarm only when all managed sites are recorded", () => {
+  const nowMs = Date.parse("2026-04-24T00:00:00.000Z")
+
+  assert.equal(
+    backgroundLogic.computeNextAlarmDelayMinutes(
+      {
+        epic: {
+          nextAutoRunAt: "2026-04-25T00:00:00.000Z",
+        },
+        fab: {
+          nextAutoRunAt: "2026-04-26T00:00:00.000Z",
+        },
+      },
+      {
+        nowMs,
+        defaultDelayMinutes: 1,
+      },
+    ),
+    1440,
+  )
+
+  assert.equal(
+    backgroundLogic.computeNextAlarmDelayMinutes(
+      {
+        epic: {
+          nextAutoRunAt: "2026-04-25T00:00:00.000Z",
+        },
+      },
+      {
+        nowMs,
+        defaultDelayMinutes: 1,
+      },
+    ),
+    1,
+  )
+})
+
 test("shouldRejectConcurrentRun rejects manual claim while inspect run is active", () => {
   assert.equal(
     backgroundLogic.shouldRejectConcurrentRun(
