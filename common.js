@@ -197,6 +197,244 @@
       : `${FAB_LISTING_PATH_PREFIX}${pathname}`
   }
 
+  function normalizeAssetUrl(value, baseUrl) {
+    const url = String(value || "").trim()
+    if (!url) {
+      return null
+    }
+
+    try {
+      const parsedUrl = new URL(url, baseUrl || FAB_LISTING_PATH_PREFIX)
+      return parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:"
+        ? parsedUrl.href
+        : null
+    } catch (_error) {
+      return null
+    }
+  }
+
+  function pickFirstSrcFromSrcset(value) {
+    const entries = String(value || "")
+      .split(",")
+      .map((item) => item.trim().split(/\s+/u)[0])
+      .filter(Boolean)
+
+    return entries[entries.length - 1] || null
+  }
+
+  function getNodeAttribute(node, name) {
+    if (!node || typeof node.getAttribute !== "function") {
+      return null
+    }
+
+    return node.getAttribute(name)
+  }
+
+  function queryAllSafe(node, selector) {
+    if (!node || typeof node.querySelectorAll !== "function") {
+      return []
+    }
+
+    return Array.from(node.querySelectorAll(selector))
+  }
+
+  function queryOneSafe(node, selector) {
+    if (!node || typeof node.querySelector !== "function") {
+      return null
+    }
+
+    return node.querySelector(selector)
+  }
+
+  function closestSafe(node, selector) {
+    if (!node || typeof node.closest !== "function") {
+      return null
+    }
+
+    return node.closest(selector)
+  }
+
+  function hasImageCandidate(node) {
+    return Boolean(
+      queryOneSafe(
+        node,
+        'img, source[srcset], [data-image], [data-src], [style*="background"]',
+      ),
+    )
+  }
+
+  function findNearestAncestorWithImage(node, maxDepth) {
+    let current = node
+
+    for (let depth = 0; current && depth < maxDepth; depth += 1) {
+      if (hasImageCandidate(current)) {
+        return current
+      }
+
+      current = current.parentElement || null
+    }
+
+    return null
+  }
+
+  function findFabCardRoot(anchor, root) {
+    const preferredSelectors = [
+      '[class*="nTa5u2sc"]',
+      "article",
+      "li",
+      '[data-testid*="product"]',
+      '[data-testid*="listing"]',
+      '[class*="ProductCard"]',
+      '[class*="ListingCard"]',
+    ]
+
+    for (const selector of preferredSelectors) {
+      const candidate = closestSafe(anchor, selector)
+      if (candidate && hasImageCandidate(candidate)) {
+        return candidate
+      }
+    }
+
+    const imageAncestor = findNearestAncestorWithImage(anchor, 8)
+    if (imageAncestor) {
+      return imageAncestor
+    }
+
+    return (
+      closestSafe(anchor, ".fabkit-Surface-root") ||
+      closestSafe(anchor, 'article, li, [class*="Uqqr2JU3"], [class*="nTa5u2sc"]') ||
+      closestSafe(anchor, "div") ||
+      anchor.parentElement ||
+      root
+    )
+  }
+
+  function pickImageFromNode(node, baseUrl) {
+    const candidates = []
+    const mediaNodes = queryAllSafe(
+      node,
+      "img, source[srcset], [data-image], [data-src], [style]",
+    )
+
+    for (const mediaNode of mediaNodes) {
+      candidates.push(
+        pickFirstSrcFromSrcset(getNodeAttribute(mediaNode, "srcset")),
+        getNodeAttribute(mediaNode, "data-src"),
+        getNodeAttribute(mediaNode, "data-image"),
+        mediaNode.currentSrc,
+        mediaNode.src,
+        getNodeAttribute(mediaNode, "src"),
+      )
+
+      const inlineStyle =
+        (mediaNode.style && mediaNode.style.backgroundImage) ||
+        getNodeAttribute(mediaNode, "style")
+      const backgroundMatch = String(inlineStyle || "").match(
+        /url\(["']?([^"')]+)["']?\)/iu,
+      )
+      if (backgroundMatch) {
+        candidates.push(backgroundMatch[1])
+      }
+    }
+
+    for (const candidate of candidates) {
+      const normalizedUrl = normalizeAssetUrl(candidate, baseUrl)
+      if (normalizedUrl) {
+        return normalizedUrl
+      }
+    }
+
+    return null
+  }
+
+  function pickFabListingImage(anchor, cardRoot, baseUrl) {
+    return (
+      pickImageFromNode(anchor, baseUrl) ||
+      pickImageFromNode(cardRoot, baseUrl) ||
+      null
+    )
+  }
+
+  function pickEpicOfferImage(offer) {
+    const candidates = safeArray(offer && offer.keyImages)
+      .filter((item) => item && normalizeAssetUrl(item.url))
+      .map((item, index) => ({
+        image: item,
+        index,
+        score: scoreEpicOfferImage(item),
+      }))
+
+    const landscapeCandidates = candidates
+      .filter((item) => item.score >= 500)
+      .sort(compareScoredImages)
+
+    if (landscapeCandidates.length) {
+      return landscapeCandidates[0].image.url
+    }
+
+    const fallbackCandidates = candidates.sort(compareScoredImages)
+    return fallbackCandidates.length ? fallbackCandidates[0].image.url : null
+  }
+
+  function compareScoredImages(left, right) {
+    if (right.score !== left.score) {
+      return right.score - left.score
+    }
+
+    return left.index - right.index
+  }
+
+  function scoreEpicOfferImage(image) {
+    const type = normalizeUpper(image && image.type)
+    const dimensions = parseImageDimensionsFromUrl(image && image.url)
+    const isLandscape =
+      dimensions && dimensions.width > dimensions.height
+    const isPortrait =
+      dimensions && dimensions.width < dimensions.height
+
+    let score = 0
+    if (
+      type.includes("WIDE") ||
+      type === "FEATUREDMEDIA" ||
+      type === "GALLERYIMAGE"
+    ) {
+      score += 700
+    }
+
+    if (type.includes("TALL")) {
+      score -= 300
+    }
+
+    if (type === "THUMBNAIL") {
+      score -= 100
+    }
+
+    if (isLandscape) {
+      score += 300
+    } else if (isPortrait) {
+      score -= 500
+    }
+
+    return score
+  }
+
+  function parseImageDimensionsFromUrl(url) {
+    const decodedUrl = decodeURIComponent(String(url || ""))
+    const matches = Array.from(
+      decodedUrl.matchAll(/(?:^|[^\d])(\d{3,5})x(\d{3,5})(?:[^\d]|$)/giu),
+    )
+
+    if (!matches.length) {
+      return null
+    }
+
+    const match = matches[matches.length - 1]
+    return {
+      width: Number(match[1]),
+      height: Number(match[2]),
+    }
+  }
+
   function isCurrentPromotion(offer) {
     const groups = safeArray(
       offer &&
@@ -282,10 +520,7 @@
               offer && offer.seller && offer.seller.name,
             ) || "未知发行商",
           url: buildEpicOfferUrl(offer, locale),
-          image:
-            safeArray(offer && offer.keyImages).find(
-              (item) => item && item.type === "OfferImageTall",
-            )?.url || null,
+          image: pickEpicOfferImage(offer),
           originalPrice:
             offer &&
             offer.price &&
@@ -356,6 +591,8 @@
       root.querySelectorAll('a[href*="/listings/"]'),
     )
 
+    const baseUrl =
+      (doc.location && doc.location.href) || FAB_LISTING_PATH_PREFIX
     const listings = anchors
       .map((anchor) => {
         const title =
@@ -365,13 +602,7 @@
             "",
           )
 
-        const cardRoot =
-          anchor.closest(
-            '.fabkit-Surface-root, article, li, [class*="Uqqr2JU3"], [class*="nTa5u2sc"]',
-          ) ||
-          anchor.closest("div") ||
-          anchor.parentElement ||
-          root
+        const cardRoot = findFabCardRoot(anchor, root)
         const cardText = normalizeText(cardRoot.textContent)
 
         const href = buildFabListingUrl(anchor.getAttribute("href"))
@@ -394,6 +625,7 @@
           id,
           title,
           url: href,
+          image: pickFabListingImage(anchor, cardRoot, baseUrl),
           status: isOwned ? "already-owned" : isClaimable ? "claimable" : "unknown",
           endDate: campaignEndDate,
           cardText,
@@ -549,6 +781,40 @@
     }
   }
 
+  function formatRemainingTime(value, referenceDate) {
+    const targetMs = Date.parse(value)
+    if (!Number.isFinite(targetMs)) {
+      return null
+    }
+
+    const referenceMs =
+      referenceDate instanceof Date
+        ? referenceDate.getTime()
+        : Number.isFinite(Number(referenceDate))
+          ? Number(referenceDate)
+          : Date.now()
+    const remainingMs = targetMs - referenceMs
+
+    if (remainingMs <= 0) {
+      return "已到时间"
+    }
+
+    const totalMinutes = Math.max(1, Math.ceil(remainingMs / 60000))
+    const days = Math.floor(totalMinutes / 1440)
+    const hours = Math.floor((totalMinutes % 1440) / 60)
+    const minutes = totalMinutes % 60
+
+    if (days > 0) {
+      return hours > 0 ? `剩余 ${days}天${hours}小时` : `剩余 ${days}天`
+    }
+
+    if (hours > 0) {
+      return minutes > 0 ? `剩余 ${hours}小时${minutes}分钟` : `剩余 ${hours}小时`
+    }
+
+    return `剩余 ${minutes}分钟`
+  }
+
   function computePendingCount(state) {
     const epic = safeArray(state && state.epic && state.epic.current)
     const fab = safeArray(state && state.fab && state.fab.current)
@@ -599,43 +865,107 @@
       /UNTIL\s+([A-Z]+)\s+(\d{1,2})\s+AT\s+(\d{1,2}):(\d{2})\s*(AM|PM)\s*ET/iu,
     )
 
-    if (!match) {
-      return null
-    }
-
-    const monthIndex = MONTH_INDEX[String(match[1] || "").toLowerCase()]
-    if (!Number.isInteger(monthIndex)) {
-      return null
-    }
-
-    const day = Number(match[2])
-    const minute = Number(match[4])
-    let hour = Number(match[3]) % 12
-    if (String(match[5]).toUpperCase() === "PM") {
-      hour += 12
-    }
-
     const now = referenceDate instanceof Date ? referenceDate : new Date()
     const currentYear = now.getUTCFullYear()
 
-    let candidate = buildEasternDate(currentYear, monthIndex, day, hour, minute)
+    if (match) {
+      const monthIndex = MONTH_INDEX[String(match[1] || "").toLowerCase()]
+      if (!Number.isInteger(monthIndex)) {
+        return null
+      }
+
+      const day = Number(match[2])
+      const minute = Number(match[4])
+      let hour = Number(match[3]) % 12
+      if (String(match[5]).toUpperCase() === "PM") {
+        hour += 12
+      }
+
+      return pickFabDeadlineYear({
+        buildDate: (year) => buildEasternDate(year, monthIndex, day, hour, minute),
+        currentYear,
+        now,
+      })
+    }
+
+    const beijingMatch = normalizedText.match(
+      /截至\s*(?:北京时间)?\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日\s*(上午|下午|晚上|中午|凌晨)?\s*(\d{1,2}):(\d{2})/u,
+    )
+
+    if (!beijingMatch) {
+      return null
+    }
+
+    const monthIndex = Number(beijingMatch[1]) - 1
+    const day = Number(beijingMatch[2])
+    const hour = normalizeChineseHour(
+      Number(beijingMatch[4]),
+      beijingMatch[3],
+    )
+    const minute = Number(beijingMatch[5])
+
+    return pickFabDeadlineYear({
+      buildDate: (year) => buildZonedDate(
+        year,
+        monthIndex,
+        day,
+        hour,
+        minute,
+        "Asia/Shanghai",
+      ),
+      currentYear,
+      now,
+    })
+  }
+
+  function normalizeChineseHour(hour, marker) {
+    const normalizedMarker = String(marker || "")
+
+    if ((normalizedMarker === "下午" || normalizedMarker === "晚上") && hour < 12) {
+      return hour + 12
+    }
+
+    if ((normalizedMarker === "上午" || normalizedMarker === "凌晨") && hour === 12) {
+      return 0
+    }
+
+    if (normalizedMarker === "中午" && hour < 11) {
+      return hour + 12
+    }
+
+    return hour
+  }
+
+  function pickFabDeadlineYear({ buildDate, currentYear, now }) {
+    let candidate = buildDate(currentYear)
     if (!candidate) {
       return null
     }
 
     if (candidate.getTime() + 7 * 24 * 60 * 60 * 1000 < now.getTime()) {
-      candidate = buildEasternDate(currentYear + 1, monthIndex, day, hour, minute)
+      candidate = buildDate(currentYear + 1)
     }
 
     return candidate ? candidate.toISOString() : null
   }
 
   function buildEasternDate(year, monthIndex, day, hour, minute) {
+    return buildZonedDate(
+      year,
+      monthIndex,
+      day,
+      hour,
+      minute,
+      "America/New_York",
+    )
+  }
+
+  function buildZonedDate(year, monthIndex, day, hour, minute, timeZone) {
     const targetLocalMs = Date.UTC(year, monthIndex, day, hour, minute)
     let guess = new Date(Date.UTC(year, monthIndex, day, hour, minute))
 
     for (let attempt = 0; attempt < 4; attempt += 1) {
-      const parts = getZonedDateParts(guess, "America/New_York")
+      const parts = getZonedDateParts(guess, timeZone)
       if (!parts) {
         return null
       }
@@ -703,6 +1033,7 @@
     parseEpicProductEndDate,
     extractFabPageState,
     formatDateTime,
+    formatRemainingTime,
     formatResultLabel,
     isCloudflareChallengePage,
     isEpicLoginPage,

@@ -1,6 +1,7 @@
 # Local workflow / agent artifacts
 .dev/
 .spec-workflow/
+.playwright-mcp/
 
 # Dependency directories
 node_modules/

@@ -26,6 +26,16 @@ test("parseEpicPromotionsResponse extracts current and upcoming offers", () => {
               id: "current-offer",
               title: "Current Free Game",
               seller: { name: "Epic" },
+              keyImages: [
+                {
+                  type: "OfferImageTall",
+                  url: "https://cdn.epicgames.com/current-tall.jpg",
+                },
+                {
+                  type: "OfferImageWide",
+                  url: "https://cdn.epicgames.com/current-wide.jpg",
+                },
+              ],
               catalogNs: {
                 mappings: [{ pageSlug: "current-free-game", pageType: "productHome" }],
               },
@@ -59,6 +69,12 @@ test("parseEpicPromotionsResponse extracts current and upcoming offers", () => {
               id: "upcoming-offer",
               title: "Upcoming Free Game",
               seller: { name: "Epic" },
+              keyImages: [
+                {
+                  type: "Thumbnail",
+                  url: "https://cdn.epicgames.com/upcoming-thumbnail.jpg",
+                },
+              ],
               catalogNs: {
                 mappings: [{ pageSlug: "upcoming-free-game", pageType: "productHome" }],
               },
@@ -102,8 +118,77 @@ test("parseEpicPromotionsResponse extracts current and upcoming offers", () => {
     parsed.current[0].url,
     "https://store.epicgames.com/zh-CN/p/current-free-game",
   )
+  assert.equal(parsed.current[0].image, "https://cdn.epicgames.com/current-wide.jpg")
   assert.equal(parsed.upcoming.length, 1)
   assert.equal(parsed.upcoming[0].title, "Upcoming Free Game")
+  assert.equal(
+    parsed.upcoming[0].image,
+    "https://cdn.epicgames.com/upcoming-thumbnail.jpg",
+  )
+})
+
+test("parseEpicPromotionsResponse avoids portrait epic thumbnails when landscape media exists", () => {
+  const payload = {
+    data: {
+      Catalog: {
+        searchStore: {
+          elements: [
+            {
+              id: "landscape-fallback-offer",
+              title: "Landscape Fallback",
+              seller: { name: "Epic" },
+              keyImages: [
+                {
+                  type: "Thumbnail",
+                  url: "https://cdn.epicgames.com/game_S2_1200x1600-thumb.jpg",
+                },
+                {
+                  type: "featuredMedia",
+                  url: "https://cdn.epicgames.com/game_S1_2560x1440-wide.jpg",
+                },
+              ],
+              catalogNs: {
+                mappings: [{ pageSlug: "landscape-fallback", pageType: "productHome" }],
+              },
+              price: {
+                totalPrice: {
+                  discountPrice: 0,
+                  fmtPrice: {
+                    originalPrice: "US$9.99",
+                    discountPrice: "0",
+                  },
+                },
+              },
+              promotions: {
+                promotionalOffers: [
+                  {
+                    promotionalOffers: [
+                      {
+                        startDate: "2026-04-16T15:00:00.000Z",
+                        endDate: "2026-04-23T15:00:00.000Z",
+                        discountSetting: {
+                          discountPercentage: 0,
+                        },
+                      },
+                    ],
+                  },
+                ],
+                upcomingPromotionalOffers: [],
+              },
+            },
+          ],
+        },
+      },
+    },
+  }
+
+  const parsed = common.parseEpicPromotionsResponse(payload, "zh-CN")
+
+  assert.equal(parsed.current.length, 1)
+  assert.equal(
+    parsed.current[0].image,
+    "https://cdn.epicgames.com/game_S1_2560x1440-wide.jpg",
+  )
 })
 
 test("isCloudflareChallengePage detects Cloudflare challenge text", () => {
@@ -166,6 +251,28 @@ test("parseFabListingsFromDocument marks owned item without opening detail page"
 
   const cardRoot = {
     textContent: "Bodycam Backroom VHS Effect Saved in My Library",
+    querySelectorAll(selector) {
+      if (selector.includes("img")) {
+        return [imageNode]
+      }
+
+      return []
+    },
+  }
+
+  const imageNode = {
+    currentSrc: "",
+    src: "",
+    getAttribute(name) {
+      if (name === "srcset") {
+        return "https://cdn.fab.com/small.jpg 1x, https://cdn.fab.com/large.jpg 2x"
+      }
+
+      return null
+    },
+    querySelectorAll() {
+      return []
+    },
   }
 
   const ownedAnchor = {
@@ -218,13 +325,115 @@ test("parseFabListingsFromDocument marks owned item without opening detail page"
       return null
     },
     body: root,
+    location: {
+      href: "https://www.fab.com/limited-time-free",
+    },
   }
 
   const parsed = common.parseFabListingsFromDocument(fakeDocument)
 
   assert.equal(parsed.length, 1)
   assert.equal(parsed[0].status, "already-owned")
+  assert.equal(parsed[0].image, "https://cdn.fab.com/large.jpg")
   assert.ok(parsed[0].endDate)
+})
+
+test("parseFabListingsFromDocument climbs to Fab card container for cover image", () => {
+  const heading = {
+    textContent: "限时免费（截至北京时间5月5日晚上9:59）",
+    parentElement: null,
+  }
+  const imageNode = {
+    currentSrc: "https://media.fab.com/product-cover.jpg",
+    src: "",
+    getAttribute() {
+      return null
+    },
+    querySelectorAll() {
+      return []
+    },
+  }
+  const infoRow = createFakeNode({
+    className: "fabkit-Surface-root Uqqr2JU3",
+    textContent: "Deep Water Station Kyrylo Sibiriakov -100% 免费",
+    children: [],
+  })
+  const productCard = createFakeNode({
+    className: "fabkit-Stack-root nTa5u2sc",
+    textContent: "Deep Water Station Kyrylo Sibiriakov -100% 免费",
+    children: [infoRow, imageNode],
+  })
+  const anchor = createFakeNode({
+    tagName: "A",
+    textContent: "Deep Water Station",
+    attributes: {
+      href: "/listings/ec2385d7-3e02-494b-a243-e18cac7f4a69",
+      "aria-label": "Kyrylo Sibiriakov创作的Deep Water Station",
+    },
+  })
+  const root = createFakeNode({
+    children: [productCard],
+  })
+
+  infoRow.children.push(anchor)
+  anchor.parentElement = infoRow
+  infoRow.parentElement = productCard
+  productCard.parentElement = root
+
+  const fakeDocument = {
+    querySelectorAll(selector) {
+      if (selector === "h1, h2, h3") {
+        return [heading]
+      }
+
+      if (selector === 'a[href*="/listings/"]') {
+        return [anchor]
+      }
+
+      return []
+    },
+    querySelector(selector) {
+      if (selector === "main") {
+        return root
+      }
+
+      return null
+    },
+    body: root,
+    location: {
+      href: "https://www.fab.com/limited-time-free",
+    },
+  }
+  heading.parentElement = root
+
+  const parsed = common.parseFabListingsFromDocument(fakeDocument)
+
+  assert.equal(parsed.length, 1)
+  assert.equal(parsed[0].image, "https://media.fab.com/product-cover.jpg")
+  assert.equal(parsed[0].endDate, "2026-05-05T13:59:00.000Z")
+})
+
+test("formatRemainingTime formats next claim countdown", () => {
+  const remaining = common.formatRemainingTime(
+    "2026-04-25T09:00:00.000Z",
+    new Date("2026-04-24T00:00:00.000Z"),
+  )
+
+  assert.equal(remaining, "剩余 1天9小时")
+  assert.equal(
+    common.formatRemainingTime(
+      "2026-04-24T00:30:00.000Z",
+      new Date("2026-04-24T00:00:00.000Z"),
+    ),
+    "剩余 30分钟",
+  )
+  assert.equal(
+    common.formatRemainingTime(
+      "2026-04-23T23:59:00.000Z",
+      new Date("2026-04-24T00:00:00.000Z"),
+    ),
+    "已到时间",
+  )
 })
 
 test("parseFabCampaignEndDate parses campaign deadline from heading", () => {
@@ -235,6 +444,15 @@ test("parseFabCampaignEndDate parses campaign deadline from heading", () => {
 
   assert.ok(parsed)
   assert.equal(parsed.startsWith("2026-05-05T"), true)
+})
+
+test("parseFabCampaignEndDate parses Chinese Beijing deadline", () => {
+  const parsed = common.parseFabCampaignEndDate(
+    "限时免费（截至北京时间5月5日晚上9:59）",
+    new Date("2026-04-30T00:00:00.000Z"),
+  )
+
+  assert.equal(parsed, "2026-05-05T13:59:00.000Z")
 })
 
 test("parseEpicProductEndDate parses visible epic page deadline text", () => {
@@ -252,3 +470,85 @@ test("parseEpicProductEndDate parses visible epic page deadline text", () => {
 
   assert.equal(parsed, "2026-04-30T01:00:00.000Z")
 })
+
+function createFakeNode(options) {
+  const node = {
+    tagName: options && options.tagName ? options.tagName : "DIV",
+    className: (options && options.className) || "",
+    textContent: (options && options.textContent) || "",
+    currentSrc: options && options.currentSrc,
+    src: options && options.src,
+    children: (options && options.children) || [],
+    parentElement: null,
+    attributes: (options && options.attributes) || {},
+    getAttribute(name) {
+      return Object.prototype.hasOwnProperty.call(this.attributes, name)
+        ? this.attributes[name]
+        : null
+    },
+    querySelector(selector) {
+      return this.querySelectorAll(selector)[0] || null
+    },
+    querySelectorAll(selector) {
+      return this.children.flatMap((child) => [
+        ...(matchesSelector(child, selector) ? [child] : []),
+        ...child.querySelectorAll(selector),
+      ])
+    },
+    closest(selector) {
+      let current = this
+      while (current) {
+        if (matchesSelector(current, selector)) {
+          return current
+        }
+
+        current = current.parentElement
+      }
+
+      return null
+    },
+  }
+
+  for (const child of node.children) {
+    child.parentElement = node
+  }
+
+  return node
+}
+
+function matchesSelector(node, selector) {
+  if (!node) {
+    return false
+  }
+
+  const selectorText = String(selector || "")
+  if (
+    selectorText.includes("img") &&
+    (node.tagName === "IMG" || node.currentSrc || node.src)
+  ) {
+    return true
+  }
+
+  if (selectorText === 'a[href*="/listings/"]') {
+    return node.tagName === "A" &&
+      String((node.attributes && node.attributes.href) || "").includes("/listings/")
+  }
+
+  if (selectorText.includes('[class*="nTa5u2sc"]')) {
+    return String(node.className || "").includes("nTa5u2sc")
+  }
+
+  if (selectorText.includes(".fabkit-Surface-root")) {
+    return String(node.className || "").includes("fabkit-Surface-root")
+  }
+
+  if (selectorText === "div") {
+    return node.tagName === "DIV"
+  }
+
+  if (selectorText === "article" || selectorText === "li") {
+    return node.tagName === selectorText.toUpperCase()
+  }
+
+  return false
+}

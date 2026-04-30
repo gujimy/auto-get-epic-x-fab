@@ -2,7 +2,9 @@
 
 const {
   DEFAULT_SETTINGS,
+  SITE_LABELS,
   formatDateTime,
+  formatRemainingTime,
   formatResultLabel,
 } = EpicFabCommon
 
@@ -75,6 +77,21 @@ elements.saveSettingsButton.addEventListener("click", async () => {
   await saveSettings()
 })
 
+document.addEventListener("click", async (event) => {
+  const target = event.target
+  const link =
+    target && typeof target.closest === "function"
+      ? target.closest("[data-open-url]")
+      : null
+
+  if (!link) {
+    return
+  }
+
+  event.preventDefault()
+  await openPage(link.getAttribute("data-open-url") || link.href)
+})
+
 void refresh()
 setInterval(() => {
   void refresh()
@@ -143,8 +160,13 @@ function setBusy(flag) {
 }
 
 async function openPage(url) {
+  const normalizedUrl = normalizeHttpUrl(url)
+  if (!normalizedUrl) {
+    return
+  }
+
   await chrome.tabs.create({
-    url,
+    url: normalizedUrl,
     active: true,
   })
 }
@@ -216,23 +238,24 @@ function render(state) {
   } else if (state && state.lastError) {
     elements.summaryText.textContent = `最近一次失败：${state.lastError}`
   } else {
-    elements.summaryText.textContent = `上次检测：${formatDateTime(state && state.lastCheckAt)}`
+    elements.summaryText.textContent = formatStateSummary(state)
   }
 
   elements.epicCount.textContent = String(epicCurrent.length)
   elements.fabCount.textContent = String(fabCurrent.length)
 
-  renderList(elements.epicList, epicCurrent, { site: "Epic" })
-  renderList(elements.fabList, fabCurrent, { site: "Fab" })
+  renderList(elements.epicList, epicCurrent, { site: "Epic", siteKey: "epic" })
+  renderList(elements.fabList, fabCurrent, { site: "Fab", siteKey: "fab" })
   renderList(elements.upcomingList, upcoming, {
     site: "下周",
+    siteKey: "epic",
     fallbackStatus: "upcoming",
   })
   renderDebugList((state && state.debugLog) || [], Boolean(state && state.running))
   restoreUiState(uiState)
 }
 
-function renderList(target, items, { site, fallbackStatus }) {
+function renderList(target, items, { site, siteKey, fallbackStatus }) {
   if (!items || !items.length) {
     target.className = "list empty"
     target.textContent = "暂无数据"
@@ -244,11 +267,7 @@ function renderList(target, items, { site, fallbackStatus }) {
     .map((item) => {
       const status = item.claimResult || item.status || fallbackStatus || "unknown"
       const label = item.claimResultLabel || formatResultLabel(status)
-      const timeText = item.endDate
-        ? `截止：${formatDateTime(item.endDate)}`
-        : item.startDate
-          ? `开始：${formatDateTime(item.startDate)}`
-          : "时间未知"
+      const timeText = formatItemTimeText(item, status)
       const messageText = item.claimMessage
         ? `<p class="item-note">${escapeHtml(item.claimMessage)}</p>`
         : ""
@@ -259,21 +278,115 @@ function renderList(target, items, { site, fallbackStatus }) {
             item.claimTrace.join("\n"),
           )}</pre></details>`
           : ""
+      const itemUrl = normalizeHttpUrl(item.url || item.finalUrl)
+      const imageUrl = normalizeImageUrl(item.image)
+      const titleText = escapeHtml(item.title || "未命名商品")
+      const titleMarkup = itemUrl
+        ? `<a class="item-title-link" href="${escapeHtml(itemUrl)}" data-open-url="${escapeHtml(itemUrl)}" target="_blank" rel="noreferrer">${titleText}</a>`
+        : `<span>${titleText}</span>`
+      const coverMarkup = buildCoverMarkup({
+        imageUrl,
+        itemUrl,
+        siteKey,
+        title: item.title,
+      })
 
       return `
-        <article class="item">
-          <p class="item-title">${escapeHtml(item.title)}</p>
-          <div class="item-meta">
-            <span class="status ${status}">${escapeHtml(label)}</span>
-            <span>${escapeHtml(site)}</span>
-            <span>${escapeHtml(timeText)}</span>
+        <article class="item item-${escapeHtml(getSiteClassName(siteKey))}">
+          ${coverMarkup}
+          <div class="item-body">
+            <p class="item-title">${titleMarkup}</p>
+            <div class="item-meta">
+              <span class="status ${status}">${escapeHtml(label)}</span>
+              <span>${escapeHtml(site)}</span>
+              <span>${escapeHtml(timeText)}</span>
+            </div>
+            ${messageText}
+            ${traceText}
           </div>
-          ${messageText}
-          ${traceText}
         </article>
       `
     })
     .join("")
+}
+
+function buildCoverMarkup({ imageUrl, itemUrl, siteKey, title }) {
+  const titleText = escapeHtml(title || "商品")
+  const coverClass = `item-cover item-cover-${getSiteClassName(siteKey)}`
+
+  if (imageUrl) {
+    const imageMarkup = `<img src="${escapeHtml(imageUrl)}" alt="${titleText} 封面" loading="lazy" referrerpolicy="no-referrer" />`
+    return itemUrl
+      ? `<a class="${coverClass}" href="${escapeHtml(itemUrl)}" data-open-url="${escapeHtml(itemUrl)}" target="_blank" rel="noreferrer">${imageMarkup}</a>`
+      : `<div class="${coverClass}">${imageMarkup}</div>`
+  }
+
+  const fallbackText = escapeHtml(getCoverFallbackText(title))
+  return itemUrl
+    ? `<a class="${coverClass} item-cover-empty" href="${escapeHtml(itemUrl)}" data-open-url="${escapeHtml(itemUrl)}" target="_blank" rel="noreferrer" aria-label="打开 ${titleText}">${fallbackText}</a>`
+    : `<div class="${coverClass} item-cover-empty" aria-hidden="true">${fallbackText}</div>`
+}
+
+function getSiteClassName(siteKey) {
+  return siteKey === "fab" ? "fab" : "epic"
+}
+
+function getCoverFallbackText(title) {
+  const normalizedTitle = String(title || "").trim()
+  return normalizedTitle ? normalizedTitle.slice(0, 1).toUpperCase() : "?"
+}
+
+function formatStateSummary(state) {
+  const lastCheckText = `上次检测：${formatDateTime(state && state.lastCheckAt)}`
+  const nextClaimText = formatNextClaimText(state && state.executionRecords)
+
+  return nextClaimText
+    ? `${lastCheckText} · 下次领取：${nextClaimText}`
+    : lastCheckText
+}
+
+function formatNextClaimText(records) {
+  return ["epic", "fab"]
+    .map((site) => {
+      const nextAutoRunAt = records && records[site] && records[site].nextAutoRunAt
+      const remainingText = formatRemainingTime(nextAutoRunAt)
+
+      return remainingText ? `${SITE_LABELS[site] || site} ${remainingText}` : null
+    })
+    .filter(Boolean)
+    .join(" / ")
+}
+
+function formatItemTimeText(item, status) {
+  const isUpcoming = status === "upcoming" && item && item.startDate
+  const timeValue = isUpcoming
+    ? item.startDate
+    : item && (item.endDate || item.startDate)
+  const prefix = isUpcoming || (item && !item.endDate && item.startDate)
+    ? "开始"
+    : "截止"
+
+  if (!timeValue) {
+    return "时间未知"
+  }
+
+  const remainingText = formatRemainingTime(timeValue)
+  return remainingText
+    ? `${prefix}：${formatDateTime(timeValue)}（${remainingText}）`
+    : `${prefix}：${formatDateTime(timeValue)}`
+}
+
+function normalizeHttpUrl(value) {
+  try {
+    const url = new URL(String(value || ""))
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null
+  } catch (_error) {
+    return null
+  }
+}
+
+function normalizeImageUrl(value) {
+  return normalizeHttpUrl(value)
 }
 
 function escapeHtml(value) {
