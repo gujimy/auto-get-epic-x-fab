@@ -164,6 +164,11 @@
   }
 
   function pickPageSlug(offer) {
+    // Prefer productSlug (actual game page) over urlSlug (may be promo page)
+    if (offer && offer.productSlug && offer.productSlug !== "[]") {
+      return offer.productSlug
+    }
+
     const mappings = [
       ...safeArray(offer && offer.catalogNs && offer.catalogNs.mappings),
       ...safeArray(offer && offer.offerMappings),
@@ -504,8 +509,20 @@
       .map((offer) => {
         const currentWindow = getCurrentPromotionWindow(offer)
         const upcomingWindow = getUpcomingPromotionWindow(offer)
+
+        // Treat upcoming window as current if its start date has already passed.
+        // Epic API may lag behind real time — an offer whose startDate <= now
+        // should be claimable even if still listed under upcomingPromotionalOffers.
+        const upcomingAlreadyStarted =
+          upcomingWindow &&
+          upcomingWindow.startDate &&
+          Date.parse(upcomingWindow.startDate) <= Date.now()
+            ? upcomingWindow
+            : null
+        const effectiveCurrentWindow = currentWindow || upcomingAlreadyStarted
+
         const isClaimableNow =
-          currentWindow &&
+          effectiveCurrentWindow &&
           offer &&
           offer.price &&
           offer.price.totalPrice &&
@@ -534,11 +551,11 @@
             offer.price.totalPrice.fmtPrice &&
             offer.price.totalPrice.fmtPrice.discountPrice,
           startDate:
-            (currentWindow && currentWindow.startDate) ||
+            (effectiveCurrentWindow && effectiveCurrentWindow.startDate) ||
             (upcomingWindow && upcomingWindow.startDate) ||
             null,
           endDate:
-            (currentWindow && currentWindow.endDate) ||
+            (effectiveCurrentWindow && effectiveCurrentWindow.endDate) ||
             (upcomingWindow && upcomingWindow.endDate) ||
             null,
           status: isClaimableNow
@@ -862,7 +879,7 @@
   function parseFabCampaignEndDate(text, referenceDate) {
     const normalizedText = normalizeText(text)
     const match = normalizedText.match(
-      /UNTIL\s+([A-Z]+)\s+(\d{1,2})\s+AT\s+(\d{1,2}):(\d{2})\s*(AM|PM)\s*ET/iu,
+      /UNTIL\s+([A-Z]+)\s+(\d{1,2})(?:,?\s*(\d{4}))?\s+AT\s+(\d{1,2}):(\d{2})\s*(AM|PM)\s*ET/iu,
     )
 
     const now = referenceDate instanceof Date ? referenceDate : new Date()
@@ -875,10 +892,16 @@
       }
 
       const day = Number(match[2])
-      const minute = Number(match[4])
-      let hour = Number(match[3]) % 12
-      if (String(match[5]).toUpperCase() === "PM") {
+      const explicitYear = match[3] ? Number(match[3]) : null
+      const minute = Number(match[5])
+      let hour = Number(match[4]) % 12
+      if (String(match[6]).toUpperCase() === "PM") {
         hour += 12
+      }
+
+      if (Number.isInteger(explicitYear)) {
+        const date = buildEasternDate(explicitYear, monthIndex, day, hour, minute)
+        return date ? date.toISOString() : null
       }
 
       return pickFabDeadlineYear({
@@ -889,20 +912,33 @@
     }
 
     const beijingMatch = normalizedText.match(
-      /截至\s*(?:北京时间)?\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日\s*(上午|下午|晚上|中午|凌晨)?\s*(\d{1,2}):(\d{2})/u,
+      /截至\s*(?:北京时间)?\s*(?:(\d{4})\s*年)?\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日\s*(上午|下午|晚上|中午|凌晨)?\s*(\d{1,2}):(\d{2})/u,
     )
 
     if (!beijingMatch) {
       return null
     }
 
-    const monthIndex = Number(beijingMatch[1]) - 1
-    const day = Number(beijingMatch[2])
+    const explicitYear = beijingMatch[1] ? Number(beijingMatch[1]) : null
+    const monthIndex = Number(beijingMatch[2]) - 1
+    const day = Number(beijingMatch[3])
     const hour = normalizeChineseHour(
-      Number(beijingMatch[4]),
-      beijingMatch[3],
+      Number(beijingMatch[5]),
+      beijingMatch[4],
     )
-    const minute = Number(beijingMatch[5])
+    const minute = Number(beijingMatch[6])
+
+    if (Number.isInteger(explicitYear)) {
+      const date = buildZonedDate(
+        explicitYear,
+        monthIndex,
+        day,
+        hour,
+        minute,
+        "Asia/Shanghai",
+      )
+      return date ? date.toISOString() : null
+    }
 
     return pickFabDeadlineYear({
       buildDate: (year) => buildZonedDate(

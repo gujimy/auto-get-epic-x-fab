@@ -198,6 +198,27 @@ async function handleAutomationStep(message) {
 async function handleEpicStep({ mode }) {
   const pageEndDate = parseEpicProductEndDate(document)
 
+  // Detect region block — check main page URL or iframe content
+  if (/\/purchase\/blocked/iu.test(location.href)) {
+    return result("error", "本产品在你所在区域不可用", 0, { pageEndDate })
+  }
+
+  // Check for payment-blocked element in iframes
+  const blockedFrame = document.querySelector('iframe[src*="/purchase"]')
+  try {
+    const frameDoc = blockedFrame?.contentDocument || blockedFrame?.contentWindow?.document
+    if (frameDoc?.querySelector('.payment-blocked')) {
+      return result("error", "本产品在你所在区域不可用", 0, { pageEndDate })
+    }
+  } catch (_e) {
+    // Cross-origin iframe — ignore
+  }
+
+  // Also check main document for payment-blocked
+  if (document.querySelector('.payment-blocked')) {
+    return result("error", "本产品在你所在区域不可用", 0, { pageEndDate })
+  }
+
   if (isCloudflareChallengePage(document)) {
     return result(
       "challenge-required",

@@ -127,6 +127,71 @@ test("parseEpicPromotionsResponse extracts current and upcoming offers", () => {
   )
 })
 
+test("parseEpicPromotionsResponse treats past-startDate upcoming window as current", () => {
+  const pastStartDate = "2026-01-01T15:00:00.000Z"
+  const futureEndDate = "2099-12-31T15:00:00.000Z"
+
+  const payload = {
+    data: {
+      Catalog: {
+        searchStore: {
+          elements: [
+            {
+              id: "expired-upcoming-offer",
+              title: "Expired Upcoming Game",
+              seller: { name: "Epic" },
+              keyImages: [
+                {
+                  type: "OfferImageWide",
+                  url: "https://cdn.epicgames.com/expired-wide.jpg",
+                },
+              ],
+              catalogNs: {
+                mappings: [{ pageSlug: "expired-upcoming", pageType: "productHome" }],
+              },
+              price: {
+                totalPrice: {
+                  discountPrice: 0,
+                  fmtPrice: {
+                    originalPrice: "US$19.99",
+                    discountPrice: "0",
+                  },
+                },
+              },
+              promotions: {
+                promotionalOffers: [],
+                upcomingPromotionalOffers: [
+                  {
+                    promotionalOffers: [
+                      {
+                        startDate: pastStartDate,
+                        endDate: futureEndDate,
+                        discountSetting: {
+                          discountPercentage: 0,
+                        },
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    },
+  }
+
+  const parsed = common.parseEpicPromotionsResponse(payload, "zh-CN")
+
+  assert.equal(parsed.current.length, 1)
+  assert.equal(parsed.current[0].title, "Expired Upcoming Game")
+  assert.equal(parsed.current[0].status, "claimable")
+  assert.equal(parsed.current[0].isCurrentFree, true)
+  assert.equal(parsed.current[0].startDate, pastStartDate)
+  assert.equal(parsed.current[0].endDate, futureEndDate)
+  assert.equal(parsed.upcoming.length, 0)
+})
+
 test("parseEpicPromotionsResponse avoids portrait epic thumbnails when landscape media exists", () => {
   const payload = {
     data: {
@@ -340,7 +405,7 @@ test("parseFabListingsFromDocument marks owned item without opening detail page"
 
 test("parseFabListingsFromDocument climbs to Fab card container for cover image", () => {
   const heading = {
-    textContent: "限时免费（截至北京时间5月5日晚上9:59）",
+    textContent: "限时免费（截至北京时间2026年5月5日晚上9:59）",
     parentElement: null,
   }
   const imageNode = {
@@ -453,6 +518,25 @@ test("parseFabCampaignEndDate parses Chinese Beijing deadline", () => {
   )
 
   assert.equal(parsed, "2026-05-05T13:59:00.000Z")
+})
+
+test("parseFabCampaignEndDate uses explicit Chinese year when present", () => {
+  const parsed = common.parseFabCampaignEndDate(
+    "限时免费（截至北京时间2026年5月5日晚上9:59）",
+    new Date("2027-01-01T00:00:00.000Z"),
+  )
+
+  assert.equal(parsed, "2026-05-05T13:59:00.000Z")
+})
+
+test("parseFabCampaignEndDate uses explicit English year when present", () => {
+  const parsed = common.parseFabCampaignEndDate(
+    "Limited-Time Free (Until May 5, 2026 at 9:59 AM ET)",
+    new Date("2027-01-01T00:00:00.000Z"),
+  )
+
+  assert.ok(parsed)
+  assert.equal(parsed.startsWith("2026-05-05T"), true)
 })
 
 test("parseEpicProductEndDate parses visible epic page deadline text", () => {
