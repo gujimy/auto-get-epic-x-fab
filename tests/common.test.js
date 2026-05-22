@@ -292,15 +292,26 @@ test("isSafeZeroPriceContext accepts explicit zero discount checkout", () => {
   assert.equal(common.isSafeZeroPriceContext(fakeDocument), true)
 })
 
-test("isSafeZeroPriceContext rejects checkout pages with payment risk", () => {
+test("isSafeZeroPriceContext rejects checkout pages with actual payment risk", () => {
   const fakeDocument = {
     body: {
-      innerText: "Order Summary You Pay Today US$0.00 Payment Method",
-      textContent: "Order Summary You Pay Today US$0.00 Payment Method",
+      innerText: "Order Summary You Pay Today US$19.99 Payment Method: Visa ****1234",
+      textContent: "Order Summary You Pay Today US$19.99 Payment Method: Visa ****1234",
     },
   }
 
   assert.equal(common.isSafeZeroPriceContext(fakeDocument), false)
+})
+
+test("isSafeZeroPriceContext accepts Epic free game checkout with payment method label", () => {
+  const fakeDocument = {
+    body: {
+      innerText: "Order Summary Limited-Time Free -100% You Pay Today US$0.00 Payment Method",
+      textContent: "Order Summary Limited-Time Free -100% You Pay Today US$0.00 Payment Method",
+    },
+  }
+
+  assert.equal(common.isSafeZeroPriceContext(fakeDocument), true)
 })
 
 test("parseFabListingsFromDocument marks owned item without opening detail page", () => {

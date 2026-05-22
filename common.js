@@ -79,9 +79,8 @@
     /卡号/iu,
     /PAYPAL/iu,
     /BILLING/iu,
-    /PAYMENT METHOD/iu,
-    /付款方式/iu,
-    /支付方式/iu,
+    /付款方式\s*[:：]\s*\S/u,
+    /支付方式\s*[:：]\s*\S/u,
   ]
 
   const CLOUDFLARE_PATTERNS = [
