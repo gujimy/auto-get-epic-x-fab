@@ -53,20 +53,16 @@
 
   const FAB_OWNED_PATTERNS = [
     "在库中",
-    "我的库",
-    "查看库",
     "SAVED IN MY LIBRARY",
-    "VIEW IN MY LIBRARY",
     "已保存到我的库",
-    "IN LIBRARY",
-    "VIEW IN LIBRARY",
-    "DOWNLOAD",
-    "下载",
   ]
+
+  const FAB_CLAIMABLE_PATTERN = /\bBUY NOW\b|立即购买|\bADD TO LIBRARY\b|添加[到至]库|加入库|\bADD TO CART\b|添加至购物车|\bCHECKOUT\b|结算|\bPLACE ORDER\b|确认订单|REVIEW AND PLACE ORDER/iu
 
   const CHECKOUT_ZERO_PATTERNS = [
     /免费/iu,
     /\bFREE\b/iu,
+    /THIS IS FREE/iu,
     /-100%/u,
     /\$0(?:\.00)?/u,
     /US\$0(?:\.00)?/u,
@@ -748,16 +744,12 @@
       return "login-required"
     }
 
-    if (detectOwnedStatus(text, FAB_OWNED_PATTERNS)) {
-      return "already-owned"
+    if (FAB_CLAIMABLE_PATTERN.test(text)) {
+      return "claimable"
     }
 
-    if (
-      /\bBUY NOW\b|立即购买|\bADD TO CART\b|添加至购物车|\bCHECKOUT\b|结算|\bPLACE ORDER\b|确认订单|REVIEW AND PLACE ORDER/iu.test(
-        text,
-      )
-    ) {
-      return "claimable"
+    if (detectOwnedStatus(text, FAB_OWNED_PATTERNS)) {
+      return "already-owned"
     }
 
     return "unknown"

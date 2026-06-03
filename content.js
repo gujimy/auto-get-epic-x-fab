@@ -33,6 +33,7 @@ const BUTTON_TEXT = {
   ],
   epicOwned: ["已在库中", "在库中", "已拥有", "IN LIBRARY", "OWNED"],
   fabBuyNow: ["立即购买", "BUY NOW"],
+  fabAddToLibrary: ["ADD TO LIBRARY", "添加到库", "添加至库", "加入库"],
   fabAddToCart: ["添加至购物车", "ADD TO CART"],
   fabCheckout: [
     "去结算",
@@ -56,7 +57,7 @@ const BUTTON_TEXT = {
     "COMPLETE PURCHASE",
     "下单",
   ],
-  fabOwned: ["在库中", "查看库", "我的库", "IN LIBRARY", "VIEW IN LIBRARY", "下载", "DOWNLOAD"],
+  fabOwned: ["在库中", "SAVED IN MY LIBRARY", "已保存到我的库"],
 }
 
 const SUCCESS_PATTERNS = [
@@ -111,12 +112,18 @@ const FAB_SUCCESS_SELECTORS = {
   heading: [
     "SAVED IN MY LIBRARY",
     "已保存到我的库",
+    "ADDED TO LIBRARY",
+    "ADDED TO MY LIBRARY",
+    "已添加到库",
+    "已添加到我的库",
   ],
   followUp: [
     "VIEW IN MY LIBRARY",
     "VIEW IN LAUNCHER",
     "查看我的库",
     "在启动器中查看",
+    "VIEW IN LIBRARY",
+    "IN MY LIBRARY",
   ],
 }
 
@@ -389,6 +396,15 @@ async function handleFabStep({ mode }) {
     }
 
     if (isHostedPaymentCheckoutPage()) {
+      if (isFabCaptchaChallengePage()) {
+        return result(
+          "challenge-required",
+          "Fab 免费领取页出现 hCaptcha 验证，请手动完成后重试",
+          0,
+          { keepTabOpen: true },
+        )
+      }
+
       if (!shouldAttemptOrderSubmission()) {
         return result(
           "needs-manual",
@@ -398,19 +414,27 @@ async function handleFabStep({ mode }) {
 
       ensureAllCheckboxesChecked()
 
+      if (clickFabAddToLibraryButton()) {
+        return result("navigating", "已点击 Fab Add to library 按钮", 1800)
+      }
+
       if (await clickHostedPaymentConfirmButton()) {
         return result("navigating", "已点击 Fab 托管结算页 Place Order 按钮", 1800)
       }
 
       return result(
         "navigating",
-        "已进入 Fab 托管结算页，等待 Place Order 按钮可点击",
+        "已进入 Fab 免费领取页，等待 Add to library 按钮可点击",
         1200,
       )
     }
 
     if (clickFirstButton(BUTTON_TEXT.fabBuyNow)) {
       return result("navigating", "已点击 Fab 立即购买按钮", 1600)
+    }
+
+    if (clickFabAddToLibraryButton()) {
+      return result("navigating", "已点击 Fab Add to library 按钮", 1600)
     }
 
     if (clickFirstButton(BUTTON_TEXT.fabAddToCart)) {
@@ -492,6 +516,22 @@ function clickEpicGetButton(epicPurchaseButton) {
   }
 
   return clickElementRobust(epicPurchaseButton)
+}
+
+function clickFabAddToLibraryButton() {
+  if (clickFirstButton(BUTTON_TEXT.fabAddToLibrary)) {
+    return true
+  }
+
+  const labelNode = findFirstTextNode(
+    BUTTON_TEXT.fabAddToLibrary,
+    "button span, button div, .eds-button__label",
+  )
+  const button = labelNode && labelNode.closest
+    ? labelNode.closest('button, a, [role="button"]')
+    : null
+
+  return clickElementRobust(button)
 }
 
 function hasVisibleMatch(candidates) {
@@ -718,8 +758,12 @@ function isHostedPaymentCheckoutPage() {
     return true
   }
 
+  if (hasFabPaymentFrame()) {
+    return true
+  }
+
   const text = normalizeText(document.body && document.body.innerText)
-  return /REVIEW AND PLACE ORDER|ORDER SUMMARY|PLACE ORDER|CHECKOUT/iu.test(text)
+  return /REVIEW AND PLACE ORDER|ORDER SUMMARY|PLACE ORDER|CHECKOUT|ADD TO LIBRARY|THIS IS FREE/iu.test(text)
 }
 
 function isHostedPaymentLoadingState() {
@@ -765,6 +809,33 @@ function hasFabActivePurchaseFlow() {
   }
 
   return false
+}
+
+function isFabCaptchaChallengePage() {
+  const challengeNodes = Array.from(
+    document.querySelectorAll(
+      'iframe[src*="hcaptcha.com"], [id*="h_captcha" i], [class*="h-captcha" i]',
+    ),
+  )
+
+  return challengeNodes.some((node) => {
+    const style = typeof window.getComputedStyle === "function"
+      ? window.getComputedStyle(node)
+      : null
+    const rect = typeof node.getBoundingClientRect === "function"
+      ? node.getBoundingClientRect()
+      : { width: 0, height: 0 }
+
+    return Boolean(
+      rect.width >= 80 &&
+        rect.height >= 80 &&
+        (!style || (style.display !== "none" && style.visibility !== "hidden")),
+    )
+  })
+}
+
+function hasFabPaymentFrame() {
+  return Boolean(document.querySelector('iframe[src*="/payment/web/purchase"]'))
 }
 
 function hasEpicActivePurchaseFlow() {
@@ -813,6 +884,18 @@ function findNodeByText(patterns, selector) {
     )
 
     if (matched) {
+      return node
+    }
+  }
+
+  return null
+}
+
+function findFirstTextNode(patterns, selector) {
+  const nodes = Array.from(document.querySelectorAll(selector || "*"))
+  for (const node of nodes) {
+    const text = normalizeText(node.textContent).toUpperCase()
+    if (textMatchesCandidates(text, patterns)) {
       return node
     }
   }
@@ -870,6 +953,8 @@ function collectAutomationDebug(site, step) {
     title: normalizeText(document.title),
     loading: isHostedPaymentLoadingState(),
     checkout: isHostedPaymentCheckoutPage(),
+    fabPaymentFrame: site === "fab" ? hasFabPaymentFrame() : false,
+    fabCaptcha: site === "fab" ? isFabCaptchaChallengePage() : false,
     hasFabSuccess: site === "fab" ? hasFabSuccessState() : false,
     hasGenericSuccess: hasSuccessState(),
     hostedConfirmButton: getButtonSnapshotBySelectors(HOSTED_PAYMENT_SELECTORS.confirmButton),

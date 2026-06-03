@@ -314,6 +314,39 @@ test("isSafeZeroPriceContext accepts Epic free game checkout with payment method
   assert.equal(common.isSafeZeroPriceContext(fakeDocument), true)
 })
 
+test("extractFabPageState treats Add to library free page as claimable", () => {
+  const fakeDocument = {
+    location: { href: "https://www.fab.com/listings/example" },
+    body: {
+      innerText: "Advanced Grid Inventory System $0.00 This is free. Add it to your library to get started. Add to library",
+      textContent: "Advanced Grid Inventory System $0.00 This is free. Add it to your library to get started. Add to library",
+    },
+    documentElement: { innerHTML: "" },
+    querySelector() {
+      return null
+    },
+  }
+
+  assert.equal(common.extractFabPageState(fakeDocument), "claimable")
+  assert.equal(common.isSafeZeroPriceContext(fakeDocument), true)
+})
+
+test("extractFabPageState prefers Fab purchase actions over generic library text", () => {
+  const fakeDocument = {
+    location: { href: "https://www.fab.com/listings/16b82fb0-7ea5-4627-adcc-95f23a387b61" },
+    body: {
+      innerText: "Kaya Products Advanced Grid Inventory System Game Systems License Select a license Personal $59.99 Free* -100% Sale ends 06/16/2026 Buy now Add to cart View in library Download",
+      textContent: "Kaya Products Advanced Grid Inventory System Game Systems License Select a license Personal $59.99 Free* -100% Sale ends 06/16/2026 Buy now Add to cart View in library Download",
+    },
+    documentElement: { innerHTML: "" },
+    querySelector() {
+      return null
+    },
+  }
+
+  assert.equal(common.extractFabPageState(fakeDocument), "claimable")
+})
+
 test("parseFabListingsFromDocument marks owned item without opening detail page", () => {
   const heading = {
     textContent: "Limited-Time Free (Until May 5 at 9:59 AM ET)",
