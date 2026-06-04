@@ -18,6 +18,10 @@ const BUTTON_TEXT = {
   epicCheckout: ["去结算", "前往结算", "CHECKOUT", "PROCEED TO CHECKOUT"],
   epicOrder: [
     "确认订单",
+    "添加到库",
+    "添加至库",
+    "加入库",
+    "ADD TO LIBRARY",
     "CONFIRM ORDER",
     "完成订单",
     "COMPLETE ORDER",
@@ -268,6 +272,13 @@ async function handleEpicStep({ mode }) {
     })
   }
 
+  if (mode === "claim" && isHostedPaymentCheckoutPage()) {
+    const orderResult = await trySubmitEpicOrder(pageEndDate)
+    if (orderResult) {
+      return orderResult
+    }
+  }
+
   if (mode === "claim" && clickEpicGetButton(epicPurchaseButton)) {
     return result("navigating", "已点击 Epic 获取按钮", 1400, { pageEndDate })
   }
@@ -286,46 +297,9 @@ async function handleEpicStep({ mode }) {
       )
     }
 
-    if (isHostedPaymentCheckoutPage() && !shouldAttemptOrderSubmission()) {
-      return result(
-        "needs-manual",
-        "已进入 Epic 结算页，但未确认零价订单，停止自动提交",
-        0,
-        { pageEndDate },
-      )
-    }
-
-    if (shouldAttemptEpicOrderSubmission()) {
-      ensureAllCheckboxesChecked()
-
-      if (await clickHostedPaymentConfirmButton()) {
-        return result("navigating", "已点击 Epic 托管结算页 Place Order 按钮", 1800, {
-          pageEndDate,
-        })
-      }
-
-      if (clickFirstButton(BUTTON_TEXT.epicCheckout)) {
-        return result("navigating", "已点击 Epic 去结算按钮", 1600, { pageEndDate })
-      }
-
-      if (clickFirstKnownSelector(EPIC_CHECKOUT_SELECTORS.confirmButton)) {
-        return result("navigating", "已点击 Epic Place Order 按钮", 1800, {
-          pageEndDate,
-        })
-      }
-
-      if (clickFirstButton(BUTTON_TEXT.epicOrder)) {
-        return result("navigating", "已点击 Epic 确认订单按钮", 1800, { pageEndDate })
-      }
-
-      if (isHostedPaymentCheckoutPage()) {
-        return result(
-          "navigating",
-          "已进入 Epic 托管结算页，等待 Place Order 按钮可点击",
-          1200,
-          { pageEndDate },
-        )
-      }
+    const orderResult = await trySubmitEpicOrder(pageEndDate)
+    if (orderResult) {
+      return orderResult
     }
 
     if (hasEpicActivePurchaseFlow()) {
@@ -347,6 +321,54 @@ async function handleEpicStep({ mode }) {
   return result("needs-manual", "未识别到 Epic 可自动操作按钮", 0, {
     pageEndDate,
   })
+}
+
+async function trySubmitEpicOrder(pageEndDate) {
+  if (isHostedPaymentCheckoutPage() && !shouldAttemptOrderSubmission()) {
+    return result(
+      "needs-manual",
+      "已进入 Epic 结算页，但未确认零价订单，停止自动提交",
+      0,
+      { pageEndDate },
+    )
+  }
+
+  if (!shouldAttemptEpicOrderSubmission()) {
+    return null
+  }
+
+  ensureAllCheckboxesChecked()
+
+  if (await clickHostedPaymentConfirmButton()) {
+    return result("navigating", "已点击 Epic 托管结算页 Place Order 按钮", 1800, {
+      pageEndDate,
+    })
+  }
+
+  if (clickFirstButton(BUTTON_TEXT.epicCheckout)) {
+    return result("navigating", "已点击 Epic 去结算按钮", 1600, { pageEndDate })
+  }
+
+  if (clickFirstKnownSelector(EPIC_CHECKOUT_SELECTORS.confirmButton)) {
+    return result("navigating", "已点击 Epic Place Order 按钮", 1800, {
+      pageEndDate,
+    })
+  }
+
+  if (clickFirstButton(BUTTON_TEXT.epicOrder)) {
+    return result("navigating", "已点击 Epic 确认订单按钮", 1800, { pageEndDate })
+  }
+
+  if (isHostedPaymentCheckoutPage()) {
+    return result(
+      "navigating",
+      "已进入 Epic 托管结算页，等待 Place Order 按钮可点击",
+      1200,
+      { pageEndDate },
+    )
+  }
+
+  return null
 }
 
 async function handleFabStep({ mode }) {

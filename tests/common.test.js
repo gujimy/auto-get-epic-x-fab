@@ -314,6 +314,18 @@ test("isSafeZeroPriceContext accepts Epic free game checkout with payment method
   assert.equal(common.isSafeZeroPriceContext(fakeDocument), true)
 })
 
+test("isSafeZeroPriceContext accepts Epic add-to-library confirmation modal", () => {
+  const text = "《征服之歌》 US$0.00 这是免费内容。添加到库即可开始体验。添加到库"
+  const fakeDocument = {
+    body: {
+      innerText: text,
+      textContent: text,
+    },
+  }
+
+  assert.equal(common.isSafeZeroPriceContext(fakeDocument), true)
+})
+
 test("extractFabPageState treats Add to library free page as claimable", () => {
   const fakeDocument = {
     location: { href: "https://www.fab.com/listings/example" },
