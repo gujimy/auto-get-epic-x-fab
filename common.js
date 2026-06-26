@@ -160,10 +160,22 @@
     return Array.isArray(value) ? value : []
   }
 
+  function cleanEpicSlug(rawSlug) {
+    if (!rawSlug) return null
+
+    // Epic API may return full paths like "site/p/slug-name/home"
+    // Extract the part after /p/ if present
+    const pIndex = rawSlug.lastIndexOf('/p/')
+    const slug = pIndex >= 0 ? rawSlug.substring(pIndex + 3) : rawSlug
+
+    // Strip trailing page type suffix (e.g., "/home", "/productHome")
+    return slug.split('/')[0] || null
+  }
+
   function pickPageSlug(offer) {
     // Prefer productSlug (actual game page) over urlSlug (may be promo page)
     if (offer && offer.productSlug && offer.productSlug !== "[]") {
-      return offer.productSlug
+      return cleanEpicSlug(offer.productSlug)
     }
 
     const mappings = [
@@ -171,13 +183,17 @@
       ...safeArray(offer && offer.offerMappings),
     ]
 
-    const mapping =
-      mappings.find((item) => item && item.pageSlug) ||
-      (offer && offer.urlSlug
-        ? { pageSlug: offer.urlSlug, pageType: "productHome" }
-        : null)
+    const fromMappings = mappings.find((item) => item && item.pageSlug)
+    if (fromMappings) {
+      return cleanEpicSlug(fromMappings.pageSlug)
+    }
 
-    return mapping ? mapping.pageSlug : null
+    // Fallback to urlSlug
+    if (offer && offer.urlSlug) {
+      return cleanEpicSlug(offer.urlSlug)
+    }
+
+    return null
   }
 
   function buildEpicOfferUrl(offer, locale) {
