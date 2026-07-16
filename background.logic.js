@@ -20,6 +20,8 @@
   }
   const COMPLETED_CLAIM_STATUSES = new Set(["claimed", "already-owned"])
   const DEFAULT_ALARM_DELAY_MINUTES = 1
+  // 平台到点后通常不会立刻刷新可领状态，自动领取延后一段时间再启动
+  const CLAIM_START_DELAY_MS = 10 * 60 * 1000
   const MANAGED_SITES = ["epic", "fab"]
 
   function getRunScope(options) {
@@ -105,22 +107,48 @@
     }
   }
 
+  function getClaimStartDelayMs(options) {
+    if (
+      options &&
+      Object.prototype.hasOwnProperty.call(options, "claimStartDelayMs")
+    ) {
+      const override = Number(options.claimStartDelayMs)
+      if (Number.isFinite(override) && override >= 0) {
+        return override
+      }
+    }
+
+    return CLAIM_START_DELAY_MS
+  }
+
+  function applyClaimStartDelay(timeMs, options) {
+    return timeMs + getClaimStartDelayMs(options)
+  }
+
   function pickNextAutoRunAt(currentItems, upcomingItems, options) {
     const nowMs =
       Number.isFinite(options && options.nowMs) ? Number(options.nowMs) : Date.now()
     const candidates = []
 
     for (const item of (currentItems || []).filter(Boolean)) {
+      // 当前批次结束后的切换点，也延后执行，等平台刷新下一轮
       const futureEnd = parseFutureTime(item.endDate, nowMs)
       if (futureEnd) {
-        candidates.push(futureEnd)
+        candidates.push({
+          value: new Date(applyClaimStartDelay(futureEnd.timeMs, options)).toISOString(),
+          timeMs: applyClaimStartDelay(futureEnd.timeMs, options),
+        })
       }
     }
 
     for (const item of (upcomingItems || []).filter(Boolean)) {
+      // 预告开领时间到点后延后执行，避免平台尚未刷新
       const futureStart = parseFutureTime(item.startDate, nowMs)
       if (futureStart) {
-        candidates.push(futureStart)
+        candidates.push({
+          value: new Date(applyClaimStartDelay(futureStart.timeMs, options)).toISOString(),
+          timeMs: applyClaimStartDelay(futureStart.timeMs, options),
+        })
       }
     }
 
@@ -278,10 +306,12 @@
   }
 
   return {
+    CLAIM_START_DELAY_MS,
     areAllCurrentItemsCompleted,
     buildSuccessfulExecutionRecord,
     buildNextDebugLog,
     computeNextAlarmDelayMinutes,
+    getClaimStartDelayMs,
     getSiteAutoSkipInfo,
     getResponsePriority,
     getRunScope,

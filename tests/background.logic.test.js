@@ -137,7 +137,53 @@ test("buildSuccessfulExecutionRecord records next auto run after completed batch
   assert.equal(record.itemCount, 2)
   assert.deepEqual(record.itemIds, ["game-1", "game-2"])
   assert.equal(record.lastSuccessAt, "2026-04-24T00:00:00.000Z")
-  assert.equal(record.nextAutoRunAt, "2026-04-30T15:00:00.000Z")
+  // 到点后延后 10 分钟再自动执行，给平台刷新留缓冲
+  assert.equal(record.nextAutoRunAt, "2026-04-30T15:10:00.000Z")
+})
+
+test("pickNextAutoRunAt delays start and end times by claim start buffer", () => {
+  const nextFromStart = backgroundLogic.pickNextAutoRunAt(
+    [],
+    [
+      {
+        id: "next-game",
+        startDate: "2026-04-30T15:00:00.000Z",
+      },
+    ],
+    {
+      nowMs: Date.parse("2026-04-24T00:00:00.000Z"),
+    },
+  )
+  assert.equal(nextFromStart, "2026-04-30T15:10:00.000Z")
+
+  const nextFromEnd = backgroundLogic.pickNextAutoRunAt(
+    [
+      {
+        id: "current-game",
+        endDate: "2026-04-30T15:00:00.000Z",
+      },
+    ],
+    [],
+    {
+      nowMs: Date.parse("2026-04-24T00:00:00.000Z"),
+    },
+  )
+  assert.equal(nextFromEnd, "2026-04-30T15:10:00.000Z")
+
+  const customDelay = backgroundLogic.pickNextAutoRunAt(
+    [],
+    [
+      {
+        id: "next-game",
+        startDate: "2026-04-30T15:00:00.000Z",
+      },
+    ],
+    {
+      nowMs: Date.parse("2026-04-24T00:00:00.000Z"),
+      claimStartDelayMs: 5 * 60 * 1000,
+    },
+  )
+  assert.equal(customDelay, "2026-04-30T15:05:00.000Z")
 })
 
 test("buildSuccessfulExecutionRecord ignores unfinished current batch", () => {
@@ -241,6 +287,31 @@ test("computeNextAlarmDelayMinutes delays alarm only when all managed sites are 
       },
     ),
     1,
+  )
+})
+
+test("shouldSkipSiteAutoRun keeps waiting during post-start refresh buffer", () => {
+  const record = {
+    // 对应官方开领时间 15:00，缓冲后的实际执行点 15:10
+    nextAutoRunAt: "2026-04-30T15:10:00.000Z",
+  }
+
+  assert.equal(
+    backgroundLogic.shouldSkipSiteAutoRun(record, {
+      nowMs: Date.parse("2026-04-30T15:05:00.000Z"),
+      isManualTrigger: false,
+      forceClaim: false,
+    }),
+    true,
+  )
+
+  assert.equal(
+    backgroundLogic.shouldSkipSiteAutoRun(record, {
+      nowMs: Date.parse("2026-04-30T15:10:00.000Z"),
+      isManualTrigger: false,
+      forceClaim: false,
+    }),
+    false,
   )
 })
 
